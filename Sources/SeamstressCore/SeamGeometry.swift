@@ -62,28 +62,34 @@ public struct VisibleSeam: Equatable, Sendable {
 /// Result of hit-testing a cursor point against visible seams.
 public enum SeamHit: Equatable, Sendable {
     case single(VisibleSeam)
-    /// Cursor sits at the junction of a vertical and horizontal seam (e.g. `┼` or `├`),
-    /// allowing simultaneous 2-axis resizing.
-    case intersection(vertical: VisibleSeam, horizontal: VisibleSeam)
+    /// Cursor sits at the junction of one or more vertical and horizontal seams (e.g. `┼` in
+    /// a 2×2 grid where two horizontal splits meet a vertical split, or `├` in a 3-pane layout),
+    /// allowing simultaneous 2-axis resizing of every seam meeting at that point.
+    case intersection(verticals: [VisibleSeam], horizontals: [VisibleSeam])
 
     public var spaceKey: SpaceKey {
         switch self {
         case .single(let s): return s.spaceKey
-        case .intersection(let v, _): return v.spaceKey
+        case .intersection(let vs, let hs): return (vs.first ?? hs.first)!.spaceKey
         }
     }
 
     public var participatingWindowIDs: Set<WindowID> {
         switch self {
-        case .single(let s): return s.participatingWindowIDs
-        case .intersection(let v, let h): return v.participatingWindowIDs.union(h.participatingWindowIDs)
+        case .single(let s):
+            return s.participatingWindowIDs
+        case .intersection(let vs, let hs):
+            var ids = Set<WindowID>()
+            for s in vs { ids.formUnion(s.participatingWindowIDs) }
+            for s in hs { ids.formUnion(s.participatingWindowIDs) }
+            return ids
         }
     }
 
     public var allSeams: [VisibleSeam] {
         switch self {
         case .single(let s): return [s]
-        case .intersection(let v, let h): return [v, h]
+        case .intersection(let vs, let hs): return vs + hs
         }
     }
 
@@ -91,18 +97,21 @@ public enum SeamHit: Equatable, Sendable {
         switch self {
         case .single(let s):
             return s.hitRect.contains(point)
-        case .intersection(let v, let h):
-            return v.hitRect.contains(point) && h.hitRect.contains(point)
+        case .intersection(let vs, let hs):
+            return vs.contains(where: { $0.hitRect.contains(point) })
+                && hs.contains(where: { $0.hitRect.contains(point) })
         }
     }
 
-    /// Stable identifier pair for change detection on hover.
+    /// Stable identifier for change detection on hover.
     public var identityKey: String {
         switch self {
         case .single(let s):
             return "\(s.spaceKey):\(s.splitID)"
-        case .intersection(let v, let h):
-            return "\(v.spaceKey):\(v.splitID)+\(h.splitID)"
+        case .intersection(let vs, let hs):
+            let vIDs = vs.map { String($0.splitID) }.joined(separator: ",")
+            let hIDs = hs.map { String($0.splitID) }.joined(separator: ",")
+            return "\(spaceKey):v[\(vIDs)]+h[\(hIDs)]"
         }
     }
 }
@@ -176,33 +185,44 @@ public enum SeamGeometry {
     }
 
     /// Hit-test `point` against a precomputed list of visible seams, returning either a
-    /// single seam or a 2-axis intersection (`┼` / `├` / `┤` / `┬` / `┴`) when both a vertical
-    /// and horizontal seam's hit strips overlap at `point`.
+    /// single seam or a 2-axis intersection (`┼` / `├` / `┤` / `┬` / `┴`) collecting ALL
+    /// vertical and horizontal seams whose hit strips meet at `point`.
     public static func hitTestTarget(point: CGPoint, seams: [VisibleSeam]) -> SeamHit? {
-        var bestVertical: (seam: VisibleSeam, dist: CGFloat)?
-        var bestHorizontal: (seam: VisibleSeam, dist: CGFloat)?
+        var hitVerticals: [(seam: VisibleSeam, dist: CGFloat)] = []
+        var hitHorizontals: [(seam: VisibleSeam, dist: CGFloat)] = []
 
         for seam in seams {
-            guard seam.hitRect.contains(point) else { continue }
+            // Extend cross-axis endpoints by half hitThickness so two seams meeting at a T or ┼
+            // corner overlap cleanly in the 10×10pt junction box.
+            let expandedHit = seam.hitRect.insetBy(dx: -hitThickness * 0.5, dy: -hitThickness * 0.5)
+            guard expandedHit.contains(point) else { continue }
             switch seam.axis {
             case .vertical:
                 let dist = abs(point.x - seam.seamPosition)
-                if bestVertical == nil || dist < bestVertical!.dist || (dist == bestVertical!.dist && seam.depth < bestVertical!.seam.depth) {
-                    bestVertical = (seam, dist)
+                if dist <= hitThickness * 0.5 {
+                    hitVerticals.append((seam, dist))
                 }
             case .horizontal:
                 let dist = abs(point.y - seam.seamPosition)
-                if bestHorizontal == nil || dist < bestHorizontal!.dist || (dist == bestHorizontal!.dist && seam.depth < bestHorizontal!.seam.depth) {
-                    bestHorizontal = (seam, dist)
+                if dist <= hitThickness * 0.5 {
+                    hitHorizontals.append((seam, dist))
                 }
             }
         }
 
-        if let v = bestVertical, let h = bestHorizontal, v.seam.spaceKey == h.seam.spaceKey {
-            return .intersection(vertical: v.seam, horizontal: h.seam)
+        hitVerticals.sort { $0.dist < $1.dist || ($0.dist == $1.dist && $0.seam.depth < $1.seam.depth) }
+        hitHorizontals.sort { $0.dist < $1.dist || ($0.dist == $1.dist && $0.seam.depth < $1.seam.depth) }
+
+        if let primaryV = hitVerticals.first?.seam,
+           let primaryH = hitHorizontals.first?.seam,
+           primaryV.spaceKey == primaryH.spaceKey {
+            let space = primaryV.spaceKey
+            let vs = hitVerticals.map(\.seam).filter { $0.spaceKey == space }
+            let hs = hitHorizontals.map(\.seam).filter { $0.spaceKey == space }
+            return .intersection(verticals: vs, horizontals: hs)
         }
-        if let v = bestVertical { return .single(v.seam) }
-        if let h = bestHorizontal { return .single(h.seam) }
+        if let v = hitVerticals.first?.seam, v.hitRect.contains(point) { return .single(v) }
+        if let h = hitHorizontals.first?.seam, h.hitRect.contains(point) { return .single(h) }
         return nil
     }
 

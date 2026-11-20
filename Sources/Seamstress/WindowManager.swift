@@ -238,10 +238,12 @@ final class WindowManager: ObservableObject {
                 isDragging: false,
                 primaryScreenHeight: displayObserver.primaryScreenHeight
             )
-        case .intersection(let v, let h):
+        case .intersection(let vs, let hs):
+            let vUnion = unionVisualRect(of: vs)
+            let hUnion = unionVisualRect(of: hs)
             seamOverlay.showIntersection(
-                verticalVisualCG: v.visualRect,
-                horizontalVisualCG: h.visualRect,
+                verticalVisualCG: vUnion,
+                horizontalVisualCG: hUnion,
                 isDragging: false,
                 primaryScreenHeight: displayObserver.primaryScreenHeight
             )
@@ -281,10 +283,10 @@ final class WindowManager: ObservableObject {
                 isDragging: true,
                 primaryScreenHeight: displayObserver.primaryScreenHeight
             )
-        case .intersection(let v, let h):
+        case .intersection(let vs, let hs):
             seamOverlay.showIntersection(
-                verticalVisualCG: v.visualRect,
-                horizontalVisualCG: h.visualRect,
+                verticalVisualCG: unionVisualRect(of: vs),
+                horizontalVisualCG: unionVisualRect(of: hs),
                 isDragging: true,
                 primaryScreenHeight: displayObserver.primaryScreenHeight
             )
@@ -339,38 +341,58 @@ final class WindowManager: ObservableObject {
                 }
             }
 
-        case .intersection(let vSeam, let hSeam):
-            let vUpdate = SeamGeometry.dragUpdate(pointer: point, seam: vSeam, tree: tree, minSizes: store.learnedMinSizes)
-            let hUpdate = SeamGeometry.dragUpdate(pointer: point, seam: hSeam, tree: tree, minSizes: store.learnedMinSizes)
+        case .intersection(let initialVs, let initialHs):
+            let vIDs = Set(initialVs.map(\.splitID))
+            let hIDs = Set(initialHs.map(\.splitID))
+
+            // Read live seams from the current tree so child splits' parentBounds reflect the
+            // latest vertical/horizontal positions rather than stale drag-start bounds.
+            let liveSeams = SeamGeometry.seams(in: tree, spaceKey: session.hit.spaceKey, bounds: session.screenBounds)
+            let liveVs = liveSeams.filter { vIDs.contains($0.splitID) }
+            let liveHs = liveSeams.filter { hIDs.contains($0.splitID) }
 
             var changed = false
-            let prevV = session.lastRatios[vSeam.splitID] ?? vSeam.ratio
-            if abs(vUpdate.ratio - prevV) >= 0.001 {
-                session.lastRatios[vSeam.splitID] = vUpdate.ratio
-                _ = store.updateSeamRatio(
-                    spaceKey: vSeam.spaceKey,
-                    splitID: vSeam.splitID,
-                    ratio: vUpdate.ratio,
-                    screenBounds: session.screenBounds
-                )
-                changed = true
+            for vSeam in liveVs {
+                let vUpdate = SeamGeometry.dragUpdate(pointer: point, seam: vSeam, tree: tree, minSizes: store.learnedMinSizes)
+                let prev = session.lastRatios[vSeam.splitID] ?? vSeam.ratio
+                if abs(vUpdate.ratio - prev) >= 0.001 {
+                    session.lastRatios[vSeam.splitID] = vUpdate.ratio
+                    _ = store.updateSeamRatio(
+                        spaceKey: vSeam.spaceKey,
+                        splitID: vSeam.splitID,
+                        ratio: vUpdate.ratio,
+                        screenBounds: session.screenBounds
+                    )
+                    changed = true
+                }
             }
-            let prevH = session.lastRatios[hSeam.splitID] ?? hSeam.ratio
-            if abs(hUpdate.ratio - prevH) >= 0.001 {
-                session.lastRatios[hSeam.splitID] = hUpdate.ratio
-                _ = store.updateSeamRatio(
-                    spaceKey: hSeam.spaceKey,
-                    splitID: hSeam.splitID,
-                    ratio: hUpdate.ratio,
-                    screenBounds: session.screenBounds
-                )
-                changed = true
+
+            let treeAfterV = store.tree(for: session.hit.spaceKey)
+            for hSeam in liveHs {
+                let hUpdate = SeamGeometry.dragUpdate(pointer: point, seam: hSeam, tree: treeAfterV, minSizes: store.learnedMinSizes)
+                let prev = session.lastRatios[hSeam.splitID] ?? hSeam.ratio
+                if abs(hUpdate.ratio - prev) >= 0.001 {
+                    session.lastRatios[hSeam.splitID] = hUpdate.ratio
+                    _ = store.updateSeamRatio(
+                        spaceKey: hSeam.spaceKey,
+                        splitID: hSeam.splitID,
+                        ratio: hUpdate.ratio,
+                        screenBounds: session.screenBounds
+                    )
+                    changed = true
+                }
             }
             seamDrag = session
 
+            // Compute fresh visual hairlines from the updated tree so both lines track the cursor
+            // and span the exact updated pane widths/heights.
+            let updatedTree = store.tree(for: session.hit.spaceKey)
+            let updatedSeams = SeamGeometry.seams(in: updatedTree, spaceKey: session.hit.spaceKey, bounds: session.screenBounds)
+            let updatedVs = updatedSeams.filter { vIDs.contains($0.splitID) }
+            let updatedHs = updatedSeams.filter { hIDs.contains($0.splitID) }
             seamOverlay.showIntersection(
-                verticalVisualCG: vUpdate.visualRect,
-                horizontalVisualCG: hUpdate.visualRect,
+                verticalVisualCG: unionVisualRect(of: updatedVs.isEmpty ? initialVs : updatedVs),
+                horizontalVisualCG: unionVisualRect(of: updatedHs.isEmpty ? initialHs : updatedHs),
                 isDragging: true,
                 primaryScreenHeight: displayObserver.primaryScreenHeight
             )
@@ -448,6 +470,14 @@ final class WindowManager: ObservableObject {
                 SeamstressLog.layout.debug("Learned settled min size for window \(wid): \(Int(minW))x\(Int(minH))")
             }
         }
+    }
+
+    private func unionVisualRect(of seams: [VisibleSeam]) -> CGRect {
+        guard var rect = seams.first?.visualRect else { return .zero }
+        for seam in seams.dropFirst() {
+            rect = rect.union(seam.visualRect)
+        }
+        return rect
     }
 
     private func recordDeclaredMinSizeIfAvailable(for windowID: WindowID) {

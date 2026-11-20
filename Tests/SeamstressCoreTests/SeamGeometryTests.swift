@@ -57,11 +57,13 @@ final class SeamGeometryTests: XCTestCase {
         tree.splitOccupied(leafID: tree.leafID(for: 2)!, edge: .bottom, with: 4)
 
         let seams = SeamGeometry.seams(in: tree, spaceKey: space, bounds: screen)
-        // Center intersection (500, 400) hits both the vertical seam and a horizontal seam
+        // Center intersection (500, 400) hits the vertical seam AND BOTH horizontal seams (left & right)
         let hit = SeamGeometry.hitTestTarget(point: CGPoint(x: 500, y: 400), seams: seams)
-        if case .intersection(let v, let h) = hit {
-            XCTAssertEqual(v.axis, .vertical)
-            XCTAssertEqual(h.axis, .horizontal)
+        if case .intersection(let vs, let hs) = hit {
+            XCTAssertEqual(vs.count, 1)
+            XCTAssertEqual(hs.count, 2)
+            XCTAssertTrue(vs.allSatisfy { $0.axis == .vertical })
+            XCTAssertTrue(hs.allSatisfy { $0.axis == .horizontal })
         } else {
             XCTFail("Expected 2-axis intersection hit at (500, 400), got \(String(describing: hit))")
         }
