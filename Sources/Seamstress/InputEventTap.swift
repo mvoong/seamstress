@@ -25,6 +25,7 @@ final class InputEventTap {
     }
 
     var onHoverCandidateChanged: ((_ hit: SeamHit?, _ point: CGPoint) -> Void)?
+    var onHoverCursorReassert: (() -> Void)?
     /// Synchronous fast Z-order check used on `leftMouseDown` if the user clicks a seam
     /// before the async hover check has landed on main.
     var isSeamHitUnoccludedSync: ((_ hit: SeamHit, _ point: CGPoint) -> Bool)?
@@ -32,13 +33,16 @@ final class InputEventTap {
     /// the previously focused app when clicking an unfocused tiled window (or clicking away from one).
     var topWindowAtPointSync: ((_ point: CGPoint) -> (windowID: WindowID, ownerPID: pid_t)?)?
     var onSeamDragBegin: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
-    var onSeamDragMove: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
+    var onSeamDragMove: ((_ hit: SeamHit, _ point: CGPoint, _ shiftDown: Bool) -> Void)?
     var onSeamDragEnd: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
+    var onSeamDragCancel: (() -> Void)?
+    var onSeamShiftChangedDuringDrag: ((_ shiftDown: Bool, _ point: CGPoint) -> Void)?
     var onSeamDoubleClick: ((_ hit: SeamHit) -> Void)?
 
     var onWindowMouseDown: ((_ point: CGPoint, _ snapModifierDown: Bool, _ isGestureDrag: Bool) -> Void)?
     var onWindowMouseDragged: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
     var onWindowMouseUp: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
+    var onWindowDragCancel: (() -> Void)?
     var onSnapModifierChangedDuringDrag: ((_ snapModifierDown: Bool, _ point: CGPoint) -> Void)?
 
     private let lock = NSLock()
@@ -48,11 +52,15 @@ final class InputEventTap {
     private var unoccludedHit: SeamHit?
     private var lastHoverIdentity: String?
     private var lastHoverNotifyPoint: CGPoint = .zero
+    private var lastCursorReassertUptime: TimeInterval = 0
 
     private var activeSeamDrag: SeamHit?
     private var swallowingDoubleClickUp = false
+    private var swallowingCancelledSeamDrag = false
     private var isLeftMouseDown = false
     private var lastSnapModifierDown = false
+    private var lastShiftDownDuringSeamDrag = false
+    private var hasActiveWindowDragPreview = false
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -96,6 +104,14 @@ final class InputEventTap {
         lock.unlock()
     }
 
+    /// Called from main thread to inform the tap whether an `⌥`/`⌃⌘` snap-drag preview is active
+    /// so pressing Escape can cancel and swallow the key event.
+    func setHasActiveWindowDragPreview(_ active: Bool) {
+        lock.lock()
+        hasActiveWindowDragPreview = active
+        lock.unlock()
+    }
+
     @discardableResult
     func start() -> Bool {
         lock.lock()
@@ -108,7 +124,8 @@ final class InputEventTap {
             (1 << CGEventType.leftMouseDown.rawValue) |
             (1 << CGEventType.leftMouseDragged.rawValue) |
             (1 << CGEventType.leftMouseUp.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue)
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.keyDown.rawValue)
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -163,9 +180,14 @@ final class InputEventTap {
         runLoopSource = nil
         activeSeamDrag = nil
         swallowingDoubleClickUp = false
+        swallowingCancelledSeamDrag = false
         isLeftMouseDown = false
+        lastSnapModifierDown = false
+        lastShiftDownDuringSeamDrag = false
+        hasActiveWindowDragPreview = false
         unoccludedHit = nil
         lastHoverIdentity = nil
+        lastCursorReassertUptime = 0
         tiledWindowIDs = []
         tiledPIDs = []
         lock.unlock()
@@ -203,6 +225,35 @@ final class InputEventTap {
 
     /// Runs on the dedicated EventTap thread. Must return in microseconds.
     fileprivate func handle(type: CGEventType, event: CGEvent) -> CGEvent? {
+        // Fast path for normal typing: pass non-Escape keyDown events straight through
+        // without acquiring the lock or hopping to main.
+        if type == .keyDown {
+            guard event.getIntegerValueField(.keyboardEventKeycode) == 53 else {
+                return event
+            }
+            lock.lock()
+            if activeSeamDrag != nil {
+                activeSeamDrag = nil
+                lastShiftDownDuringSeamDrag = false
+                swallowingCancelledSeamDrag = true
+                lock.unlock()
+                DispatchQueue.main.async { [weak self] in
+                    self?.onSeamDragCancel?()
+                }
+                return nil
+            }
+            if isLeftMouseDown && hasActiveWindowDragPreview {
+                hasActiveWindowDragPreview = false
+                lock.unlock()
+                DispatchQueue.main.async { [weak self] in
+                    self?.onWindowDragCancel?()
+                }
+                return nil
+            }
+            lock.unlock()
+            return event
+        }
+
         let point = event.location
         let snapModifierDown = Self.isSnapModifierActive(event.flags)
 
@@ -224,14 +275,32 @@ final class InputEventTap {
             // >= 16pt along the same seam (handles sliding past an occluding floating window).
             let movedAlongSeam = hit != nil && hypot(point.x - prevPoint.x, point.y - prevPoint.y) >= 16
             if hitID != prevID || movedAlongSeam {
+                let now = ProcessInfo.processInfo.systemUptime
                 lock.lock()
                 lastHoverIdentity = hitID
                 lastHoverNotifyPoint = point
+                lastCursorReassertUptime = now
                 if hit == nil { unoccludedHit = nil }
                 lock.unlock()
 
                 DispatchQueue.main.async { [weak self] in
                     self?.onHoverCandidateChanged?(hit, point)
+                }
+            } else if hit != nil {
+                // Throttled cursor re-assertion (~80ms) while hovering the same seam so
+                // Chromium / Electron / editors cannot permanently steal the resize cursor.
+                let now = ProcessInfo.processInfo.systemUptime
+                lock.lock()
+                let shouldReassert = unoccludedHit != nil && (now - lastCursorReassertUptime) >= 0.08
+                if shouldReassert {
+                    lastCursorReassertUptime = now
+                }
+                lock.unlock()
+
+                if shouldReassert {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onHoverCursorReassert?()
+                    }
                 }
             }
             return event
@@ -254,13 +323,17 @@ final class InputEventTap {
                 grabbed = directHit
             }
 
+            let shiftDown = event.flags.contains(.maskShift)
+
             lock.lock()
+            swallowingCancelledSeamDrag = false
             if let hit = grabbed {
                 unoccludedHit = hit
                 isLeftMouseDown = true
                 if clickState >= 2 {
                     swallowingDoubleClickUp = true
                     activeSeamDrag = nil
+                    lastShiftDownDuringSeamDrag = false
                     lock.unlock()
                     DispatchQueue.main.async { [weak self] in
                         self?.onSeamDoubleClick?(hit)
@@ -269,6 +342,7 @@ final class InputEventTap {
                 } else {
                     swallowingDoubleClickUp = false
                     activeSeamDrag = hit
+                    lastShiftDownDuringSeamDrag = shiftDown
                     lock.unlock()
                     DispatchQueue.main.async { [weak self] in
                         self?.onSeamDragBegin?(hit, point)
@@ -310,15 +384,17 @@ final class InputEventTap {
             return event
 
         case .leftMouseDragged:
+            let shiftDown = event.flags.contains(.maskShift)
             lock.lock()
-            if swallowingDoubleClickUp {
+            if swallowingDoubleClickUp || swallowingCancelledSeamDrag {
                 lock.unlock()
                 return nil
             }
             if let hit = activeSeamDrag {
+                lastShiftDownDuringSeamDrag = shiftDown
                 lock.unlock()
                 DispatchQueue.main.async { [weak self] in
-                    self?.onSeamDragMove?(hit, point)
+                    self?.onSeamDragMove?(hit, point, shiftDown)
                 }
                 return nil
             }
@@ -333,13 +409,16 @@ final class InputEventTap {
         case .leftMouseUp:
             lock.lock()
             isLeftMouseDown = false
-            if swallowingDoubleClickUp {
+            hasActiveWindowDragPreview = false
+            if swallowingDoubleClickUp || swallowingCancelledSeamDrag {
                 swallowingDoubleClickUp = false
+                swallowingCancelledSeamDrag = false
                 lock.unlock()
                 return nil
             }
             if let hit = activeSeamDrag {
                 activeSeamDrag = nil
+                lastShiftDownDuringSeamDrag = false
                 lock.unlock()
                 DispatchQueue.main.async { [weak self] in
                     self?.onSeamDragEnd?(hit, point)
@@ -354,14 +433,23 @@ final class InputEventTap {
             return event
 
         case .flagsChanged:
+            let shiftDown = event.flags.contains(.maskShift)
             lock.lock()
-            let shouldNotify = isLeftMouseDown && activeSeamDrag == nil && snapModifierDown != lastSnapModifierDown
-            if shouldNotify {
+            let notifySeamShift = activeSeamDrag != nil && shiftDown != lastShiftDownDuringSeamDrag
+            if notifySeamShift {
+                lastShiftDownDuringSeamDrag = shiftDown
+            }
+            let notifyWindowSnap = !notifySeamShift && isLeftMouseDown && activeSeamDrag == nil && !swallowingCancelledSeamDrag && snapModifierDown != lastSnapModifierDown
+            if notifyWindowSnap {
                 lastSnapModifierDown = snapModifierDown
             }
             lock.unlock()
 
-            if shouldNotify {
+            if notifySeamShift {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onSeamShiftChangedDuringDrag?(shiftDown, point)
+                }
+            } else if notifyWindowSnap {
                 DispatchQueue.main.async { [weak self] in
                     self?.onSnapModifierChangedDuringDrag?(snapModifierDown, point)
                 }

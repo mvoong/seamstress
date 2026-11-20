@@ -23,10 +23,13 @@ A lightweight, mouse-driven macOS tiling window manager built around floating-by
 | **Normal Drag** (without `⌥` or `⌃⌘`) on a tiled window | Detaches it back to floating, restores its pre-tiled size anchored under the cursor, and expands neighboring windows to fill the gap. Pressing `⌥` or `⌃⌘` within 0.45s of starting restores the layout so you can still swap/re-split. |
 | **Manual Edge Resize** on a tiled window's own edge | Detaches it cleanly and expands neighboring windows so no stale seam stays behind. |
 | **Close / Minimize / Hide / Quit** a tiled window | Automatically collapses its split so neighboring windows expand to fill the vacated space. |
-| **Hover Seam** (`±5pt` along any flush split line or `┼` intersection) | Shows a subtle hairline + grip handle and resize cursor (crosshair at 2-axis intersections; suppressed whenever a floating window sits in front of the seam). |
-| **Drag Seam / `┼` Intersection** | Resizes all affected windows in real time (1-axis along a seam, or simultaneous 2-axis at a vertical+horizontal intersection), clamped to real window minimum sizes. |
+| **Hover Seam** (`±5pt` along any flush split line or `┼` intersection) | Shows a subtle hairline + grip handle (or centered `┼` knob at 2-axis intersections) and resize cursor (suppressed whenever a floating window sits in front of the seam). |
+| **Drag Seam / `┼` Intersection** | Resizes all affected windows in real time (1-axis along a seam, or simultaneous 2-axis at a vertical+horizontal intersection), with magnetic detents at 50% / ⅓ / ⅔ and neighboring co-linear seams (hold `⇧` for free positioning), amber clamping cues + Force Touch haptics at real window minimum sizes. |
 | **Drag Seam > 90%** toward an empty slot | Previews and collapses the empty slot on release, expanding the occupied side to 100%. |
 | **Double-click Seam** | Collapses an adjacent empty slot, or resets a split between two occupied panes to 50/50. |
+| **`Esc` during snap drag or seam resize** | Cancels cleanly and restores the window or split ratios to their pre-drag state without detaching. |
+| **Option-click / Right-click Menu Bar Icon** | Quickly toggles Seamstress between Active and Paused. |
+| **Menu Bar Minimap** | Shows live per-display app icons (click a tile to focus), **Equalize** (reset all splits to 50/50), and **Clear**. |
 
 Works passively with both standard titlebar dragging (`⌥` + drag) and macOS drag-anywhere gestures (`defaults write -g NSWindowShouldDragOnGesture -bool true`, where `⌃⌘` + drag anywhere in a window moves and snaps/splits directly).
 
@@ -47,8 +50,8 @@ Works passively with both standard titlebar dragging (`⌥` + drag) and macOS dr
 - **`AXWindowBridge.swift`**: Fast `CGWindowListCopyWindowInfo` drag detection and front-to-back Z-order occlusion checks, plus per-PID serial async AX frame queues with latest-frame coalescing, temporary `AXEnhancedUserInterface` disable during drags/commits, and shrink-vs-grow (`size → position` vs. `position → size`) write ordering to avoid Dock/menu-bar clamping.
 - **`SkyLightBridge.swift` & `DisplayObserver.swift`**: Dynamic `dlopen`/`dlsym` read-only queries for active native Spaces per display UUID and background cursor updates, refreshed on screen/Space notifications.
 - **`WindowEventMonitor.swift`**: Attaches `AXObserver` only to PIDs that currently own tiled windows (close/minimize), plus `NSWorkspace` hide/terminate observers and a lightweight CG-only sanity sweep for fullscreen or vanished windows.
-- **`DropPreviewOverlay.swift` & `SeamHighlightOverlay.swift`**: Non-activating, click-through `NSPanel` overlays with animations disabled (`CATransaction.setDisableActions(true)`) for instant visual feedback.
-- **`WindowManager.swift`, `MenuBarPopoverView.swift`, `AppDelegate.swift`**: Menu bar app (`LSUIElement`), optional hidden menu bar icon (reopening Seamstress from Spotlight/Finder opens a standalone controls window), Accessibility permission gate with live polling, current-space layout minimap, and launch-at-login (`SMAppService.mainApp`).
+- **`DropPreviewOverlay.swift` & `SeamHighlightOverlay.swift`**: Non-activating, click-through `NSPanel` overlays — frosted-glass drop preview with action badges (`Swap`, `Replace`, `Split All`) and smooth fade/morph transitions, plus seam hairlines, centered `┼` intersection knob, amber min-size clamping cues, and cursor re-assertion.
+- **`WindowManager.swift`, `MenuBarPopoverView.swift`, `AppDelegate.swift`**: Menu bar app (`LSUIElement`) with custom template icon (Option-click/right-click quick pause), optional hidden menu bar icon (reopening Seamstress from Spotlight/Finder opens a standalone controls window), Accessibility permission gate with live polling, interactive per-display minimap with app icons and Equalize/Clear actions, persisted floating restore frames, and launch-at-login (`SMAppService.mainApp` with approval-state surfacing).
 
 ## Build, Test & Install
 

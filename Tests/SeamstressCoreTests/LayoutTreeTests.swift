@@ -102,4 +102,32 @@ final class LayoutTreeTests: XCTestCase {
         XCTAssertEqual(left.width + right.width, odd.width)
         XCTAssertEqual(left.maxX, right.minX)
     }
+
+    func testEqualizeSplitsResetsAllNestedSplitsAndReportsChanges() {
+        var emptyTree = LayoutTree()
+        XCTAssertFalse(emptyTree.equalizeSplits())
+
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 101)
+        tree.splitOccupied(leafID: tree.leafID(for: 101)!, edge: .right, with: 102)
+        let rootSplitID = tree.root.id
+        tree.splitOccupied(leafID: tree.leafID(for: 102)!, edge: .bottom, with: 103)
+
+        // Already equalized
+        XCTAssertFalse(tree.equalizeSplits())
+
+        // Skew both splits
+        let seams = SeamGeometry.seams(in: tree, spaceKey: SpaceKey(displayUUID: "D", spaceID: 1), bounds: screen)
+        let nestedSplitID = seams.first { $0.splitID != rootSplitID }!.splitID
+        tree.setRatio(splitID: rootSplitID, ratio: 0.3)
+        tree.setRatio(splitID: nestedSplitID, ratio: 0.75)
+
+        XCTAssertTrue(tree.equalizeSplits())
+        XCTAssertFalse(tree.equalizeSplits())
+
+        let frames = tree.windowFrames(in: screen)
+        XCTAssertEqual(frames[101], CGRect(x: 0, y: 25, width: 800, height: 975))
+        XCTAssertEqual(frames[102], CGRect(x: 800, y: 25, width: 800, height: 488))
+        XCTAssertEqual(frames[103], CGRect(x: 800, y: 513, width: 800, height: 487))
+    }
 }

@@ -23,6 +23,8 @@ final class SeamHighlightOverlay {
     private var primaryGripLayer: CALayer?
     private var secondaryLinePanel: NSPanel?
     private var secondaryGripLayer: CALayer?
+    private var intersectionKnobPanel: NSPanel?
+    private var intersectionKnobLayer: CALayer?
     private var collapsePreviewPanel: NSPanel?
     private var activeCursor: CursorMode = .none
 
@@ -30,10 +32,13 @@ final class SeamHighlightOverlay {
         visualRectCG: CGRect,
         axis: SplitAxis,
         isDragging: Bool,
+        isClamped: Bool = false,
+        isSnapped: Bool = false,
         primaryScreenHeight: CGFloat
     ) {
         hideCollapsePreview()
         secondaryLinePanel?.orderOut(nil)
+        intersectionKnobPanel?.orderOut(nil)
 
         let panel = primaryLinePanel ?? makeLinePanel(assignGrip: { self.primaryGripLayer = $0 })
         primaryLinePanel = panel
@@ -44,15 +49,20 @@ final class SeamHighlightOverlay {
             visualRectCG: visualRectCG,
             axis: axis,
             isDragging: isDragging,
+            isClamped: isClamped,
+            isSnapped: isSnapped,
+            showGrip: true,
             primaryScreenHeight: primaryScreenHeight
         )
-        applyCursor(axis == .vertical ? .vertical : .horizontal)
+        applyCursor(axis == .vertical ? .vertical : .horizontal, force: true)
     }
 
     func showIntersection(
         verticalVisualCG: CGRect,
         horizontalVisualCG: CGRect,
         isDragging: Bool,
+        isClamped: Bool = false,
+        isSnapped: Bool = false,
         primaryScreenHeight: CGFloat
     ) {
         hideCollapsePreview()
@@ -61,6 +71,8 @@ final class SeamHighlightOverlay {
         primaryLinePanel = vPanel
         let hPanel = secondaryLinePanel ?? makeLinePanel(assignGrip: { self.secondaryGripLayer = $0 })
         secondaryLinePanel = hPanel
+        let knobPanel = intersectionKnobPanel ?? makeIntersectionKnobPanel(assignKnob: { self.intersectionKnobLayer = $0 })
+        intersectionKnobPanel = knobPanel
 
         layoutLinePanel(
             vPanel,
@@ -68,6 +80,9 @@ final class SeamHighlightOverlay {
             visualRectCG: verticalVisualCG,
             axis: .vertical,
             isDragging: isDragging,
+            isClamped: isClamped,
+            isSnapped: isSnapped,
+            showGrip: false,
             primaryScreenHeight: primaryScreenHeight
         )
         layoutLinePanel(
@@ -76,14 +91,27 @@ final class SeamHighlightOverlay {
             visualRectCG: horizontalVisualCG,
             axis: .horizontal,
             isDragging: isDragging,
+            isClamped: isClamped,
+            isSnapped: isSnapped,
+            showGrip: false,
             primaryScreenHeight: primaryScreenHeight
         )
-        applyCursor(.intersection)
+        layoutIntersectionKnob(
+            knobPanel,
+            knob: intersectionKnobLayer,
+            centerCG: CGPoint(x: verticalVisualCG.midX, y: horizontalVisualCG.midY),
+            isDragging: isDragging,
+            isClamped: isClamped,
+            isSnapped: isSnapped,
+            primaryScreenHeight: primaryScreenHeight
+        )
+        applyCursor(.intersection, force: true)
     }
 
     func showCollapsePreview(expandedBoundsCG: CGRect, axis: SplitAxis, primaryScreenHeight: CGFloat) {
         primaryLinePanel?.orderOut(nil)
         secondaryLinePanel?.orderOut(nil)
+        intersectionKnobPanel?.orderOut(nil)
 
         let panel = self.collapsePreviewPanel ?? makeCollapsePanel()
         self.collapsePreviewPanel = panel
@@ -106,12 +134,18 @@ final class SeamHighlightOverlay {
         if !panel.isVisible {
             panel.orderFrontRegardless()
         }
-        applyCursor(axis == .vertical ? .vertical : .horizontal)
+        applyCursor(axis == .vertical ? .vertical : .horizontal, force: true)
+    }
+
+    func reassertCursor() {
+        guard activeCursor != .none else { return }
+        applyCursor(activeCursor, force: true)
     }
 
     func hide() {
         primaryLinePanel?.orderOut(nil)
         secondaryLinePanel?.orderOut(nil)
+        intersectionKnobPanel?.orderOut(nil)
         hideCollapsePreview()
         clearCursor()
     }
@@ -126,6 +160,9 @@ final class SeamHighlightOverlay {
         visualRectCG: CGRect,
         axis: SplitAxis,
         isDragging: Bool,
+        isClamped: Bool,
+        isSnapped: Bool,
+        showGrip: Bool,
         primaryScreenHeight: CGFloat
     ) {
         let envelopeThickness: CGFloat = 10
@@ -153,9 +190,20 @@ final class SeamHighlightOverlay {
         if let rootLayer = panel.contentView?.layer,
            let lineLayer = rootLayer.sublayers?.first,
            let grip {
-            let accent = NSColor.controlAccentColor
-            let lineAlpha: CGFloat = isDragging ? 0.95 : 0.72
-            let pillAlpha: CGFloat = isDragging ? 1.0 : 0.90
+            let tint = isClamped ? NSColor.systemOrange : NSColor.controlAccentColor
+            let snapHighlight = isSnapped && !isClamped
+            let lineAlpha: CGFloat
+            let pillAlpha: CGFloat
+            if snapHighlight {
+                lineAlpha = isDragging ? 1.0 : 0.85
+                pillAlpha = 1.0
+            } else if isClamped {
+                lineAlpha = isDragging ? 0.95 : 0.78
+                pillAlpha = 1.0
+            } else {
+                lineAlpha = isDragging ? 0.95 : 0.72
+                pillAlpha = isDragging ? 1.0 : 0.90
+            }
 
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -169,9 +217,17 @@ final class SeamHighlightOverlay {
                 let pillW: CGFloat = min(44, max(20, nsFrame.width * 0.2))
                 grip.frame = CGRect(x: (nsFrame.width - pillW) * 0.5, y: (envelopeThickness - 6) * 0.5, width: pillW, height: 6)
             }
-            lineLayer.backgroundColor = accent.withAlphaComponent(lineAlpha).cgColor
-            grip.backgroundColor = accent.withAlphaComponent(pillAlpha).cgColor
+            lineLayer.backgroundColor = tint.withAlphaComponent(lineAlpha).cgColor
+            grip.isHidden = !showGrip
+            grip.backgroundColor = tint.withAlphaComponent(pillAlpha).cgColor
             grip.cornerRadius = 3
+            if snapHighlight {
+                grip.borderWidth = 1
+                grip.borderColor = NSColor.white.withAlphaComponent(0.85).cgColor
+            } else {
+                grip.borderWidth = 0
+                grip.borderColor = nil
+            }
             CATransaction.commit()
         }
 
@@ -180,8 +236,52 @@ final class SeamHighlightOverlay {
         }
     }
 
-    private func applyCursor(_ mode: CursorMode) {
-        guard activeCursor != mode else { return }
+    private func layoutIntersectionKnob(
+        _ panel: NSPanel,
+        knob: CALayer?,
+        centerCG: CGPoint,
+        isDragging: Bool,
+        isClamped: Bool,
+        isSnapped: Bool,
+        primaryScreenHeight: CGFloat
+    ) {
+        let panelSize: CGFloat = 18
+        let knobSize: CGFloat = 12
+        let panelCG = CGRect(
+            x: centerCG.x - panelSize * 0.5,
+            y: centerCG.y - panelSize * 0.5,
+            width: panelSize,
+            height: panelSize
+        )
+        let nsFrame = CoordinateSpace.nsRect(fromCG: panelCG, primaryHeight: primaryScreenHeight)
+        panel.setFrame(nsFrame, display: false)
+
+        if let knob {
+            let tint = isClamped ? NSColor.systemOrange : NSColor.controlAccentColor
+            let snapHighlight = isSnapped && !isClamped
+            let knobAlpha: CGFloat = (isDragging || isClamped || snapHighlight) ? 1.0 : 0.92
+            let inset = (panelSize - knobSize) * 0.5
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            knob.frame = CGRect(x: inset, y: inset, width: knobSize, height: knobSize)
+            knob.cornerRadius = knobSize * 0.5
+            knob.backgroundColor = tint.withAlphaComponent(knobAlpha).cgColor
+            if snapHighlight {
+                knob.borderWidth = 1
+                knob.borderColor = NSColor.white.withAlphaComponent(0.85).cgColor
+            } else {
+                knob.borderWidth = 0
+                knob.borderColor = nil
+            }
+            CATransaction.commit()
+        }
+
+        panel.orderFrontRegardless()
+    }
+
+    private func applyCursor(_ mode: CursorMode, force: Bool = false) {
+        guard force || activeCursor != mode else { return }
         activeCursor = mode
         switch mode {
         case .none:
@@ -228,6 +328,35 @@ final class SeamHighlightOverlay {
         view.layer?.addSublayer(lineLayer)
         view.layer?.addSublayer(grip)
         assignGrip(grip)
+        p.contentView = view
+        return p
+    }
+
+    private func makeIntersectionKnobPanel(assignKnob: (CALayer) -> Void) -> NSPanel {
+        let p = NonActivatingSeamPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        p.isFloatingPanel = true
+        p.level = .statusBar
+        p.backgroundColor = .clear
+        p.isOpaque = false
+        p.hasShadow = false
+        p.ignoresMouseEvents = true
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        p.animationBehavior = .none
+
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        let knob = CALayer()
+        knob.shadowColor = NSColor.black.cgColor
+        knob.shadowOpacity = 0.30
+        knob.shadowRadius = 2.5
+        knob.shadowOffset = .zero
+        view.layer?.addSublayer(knob)
+        assignKnob(knob)
         p.contentView = view
         return p
     }

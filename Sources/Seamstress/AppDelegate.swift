@@ -8,6 +8,7 @@ final class AppState: ObservableObject {
     @Published var showMenuBarIcon: Bool = true
     @Published var isAccessibilityTrusted: Bool = AXIsProcessTrusted()
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
+    @Published var launchAtLoginRequiresApproval: Bool = (SMAppService.mainApp.status == .requiresApproval)
 
     var onEnabledChanged: ((Bool) -> Void)?
     var onShowMenuBarIconChanged: ((Bool) -> Void)?
@@ -35,6 +36,28 @@ final class AppState: ObservableObject {
         }
     }
 
+    func openLoginItemsSettings() {
+        if let primary = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"),
+           NSWorkspace.shared.open(primary) {
+            return
+        }
+        if let fallback = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings") {
+            NSWorkspace.shared.open(fallback)
+        }
+    }
+
+    func refreshLoginItemStatus() {
+        let status = SMAppService.mainApp.status
+        let enabled = (status == .enabled)
+        let requiresApproval = (status == .requiresApproval)
+        if launchAtLogin != enabled {
+            launchAtLogin = enabled
+        }
+        if launchAtLoginRequiresApproval != requiresApproval {
+            launchAtLoginRequiresApproval = requiresApproval
+        }
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled {
@@ -42,9 +65,9 @@ final class AppState: ObservableObject {
             } else {
                 try SMAppService.mainApp.unregister()
             }
-            launchAtLogin = (SMAppService.mainApp.status == .enabled)
+            refreshLoginItemStatus()
         } catch {
-            launchAtLogin = (SMAppService.mainApp.status == .enabled)
+            refreshLoginItemStatus()
         }
     }
 
@@ -132,6 +155,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = item.button {
             button.target = self
             button.action = #selector(togglePopover(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.toolTip = "Seamstress — Click for controls, Option-click or right-click to pause/resume"
         }
         statusItem = item
 
@@ -145,18 +170,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusIcon() {
         guard let button = statusItem?.button else { return }
-        let symbolName = (appState.isEnabled && appState.isAccessibilityTrusted)
-            ? "rectangle.split.2x1"
-            : "rectangle.split.2x1.slash"
-        let fallbackName = "rectangle.split.2x1"
-        let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Seamstress")
-            ?? NSImage(systemSymbolName: fallbackName, accessibilityDescription: "Seamstress")
-        img?.isTemplate = true
-        button.image = img
-        button.appearsDisabled = !(appState.isEnabled && appState.isAccessibilityTrusted)
+        let isActive = appState.isEnabled && appState.isAccessibilityTrusted
+        button.image = Self.makeStatusBarIcon(active: isActive)
+        button.appearsDisabled = !isActive
+        if !appState.isAccessibilityTrusted {
+            button.toolTip = "Seamstress — Accessibility permission required"
+        } else if appState.isEnabled {
+            button.toolTip = "Seamstress (Active) — Click for controls, Option-click or right-click to pause"
+        } else {
+            button.toolTip = "Seamstress (Paused) — Click for controls, Option-click or right-click to resume"
+        }
+    }
+
+    private static func makeStatusBarIcon(active: Bool) -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            NSColor.black.setStroke()
+
+            let frame = rect.insetBy(dx: 1.5, dy: 3.0)
+            let outer = NSBezierPath(roundedRect: frame, xRadius: 2.5, yRadius: 2.5)
+            outer.lineWidth = 1.4
+            outer.stroke()
+
+            let splitX = frame.minX + 7.0
+            let splitY = frame.midY
+
+            let seams = NSBezierPath()
+            seams.move(to: NSPoint(x: splitX, y: frame.minY))
+            seams.line(to: NSPoint(x: splitX, y: frame.maxY))
+            seams.move(to: NSPoint(x: splitX, y: splitY))
+            seams.line(to: NSPoint(x: frame.maxX, y: splitY))
+            seams.lineWidth = 1.2
+            seams.stroke()
+
+            if !active {
+                let slash = NSBezierPath()
+                slash.move(to: NSPoint(x: rect.minX + 2.5, y: rect.maxY - 2.5))
+                slash.line(to: NSPoint(x: rect.maxX - 2.5, y: rect.minY + 2.5))
+                slash.lineCapStyle = .round
+
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current?.compositingOperation = .clear
+                slash.lineWidth = 3.2
+                slash.stroke()
+                NSGraphicsContext.restoreGraphicsState()
+
+                NSColor.black.setStroke()
+                slash.lineWidth = 1.5
+                slash.stroke()
+            }
+
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Seamstress"
+        return image
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {
+        if let event = NSApp.currentEvent,
+           (event.type == .rightMouseUp || event.modifierFlags.contains(.option)),
+           appState.isAccessibilityTrusted {
+            if popover?.isShown == true {
+                popover?.performClose(sender)
+            }
+            appState.setEnabled(!appState.isEnabled)
+            return
+        }
+
         guard let popover else { return }
         if popover.isShown {
             popover.performClose(sender)
@@ -176,12 +256,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPopover() {
         guard let button = statusItem?.button, let popover else { return }
         _ = appState.refreshTrust()
+        appState.refreshLoginItemStatus()
+        windowManager.refreshForMenuPresentation()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showControlWindow() {
         _ = appState.refreshTrust()
+        appState.refreshLoginItemStatus()
+        windowManager.refreshForMenuPresentation()
         if let existing = controlWindow {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)

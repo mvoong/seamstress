@@ -5,6 +5,7 @@ import SwiftUI
 struct MenuBarPopoverView: View {
     @ObservedObject var appState: AppState
     @ObservedObject var windowManager: WindowManager
+    @State private var hoveredLeafID: NodeID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -41,7 +42,7 @@ struct MenuBarPopoverView: View {
             }
         }
         .padding(14)
-        .frame(width: 280)
+        .frame(width: 292)
     }
 
     private var header: some View {
@@ -99,18 +100,36 @@ struct MenuBarPopoverView: View {
 
     private var layoutMiniMap: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(spacing: 4) {
                 Text("Current Space")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
-                Spacer()
-                if windowManager.activeLayoutLeaves.contains(where: { !$0.isEmpty }) {
-                    Button("Clear Layout") {
-                        windowManager.resetCurrentSpaceLayout()
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
+                    .fixedSize()
+                if !windowManager.activeDisplayName.isEmpty {
+                    Text("· \(windowManager.activeDisplayName)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
+                Spacer(minLength: 4)
+                HStack(spacing: 8) {
+                    if windowManager.canEqualizeCurrentSpace {
+                        Button("Equalize") {
+                            windowManager.equalizeCurrentSpaceLayout()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                    }
+                    if windowManager.activeLayoutLeaves.contains(where: { !$0.isEmpty }) {
+                        Button("Clear") {
+                            windowManager.resetCurrentSpaceLayout()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                    }
+                }
+                .fixedSize()
             }
 
             GeometryReader { geo in
@@ -128,17 +147,53 @@ struct MenuBarPopoverView: View {
                         let rw = max(4, leaf.frame.width * sx - 2)
                         let rh = max(4, leaf.frame.height * sy - 2)
 
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(leaf.isEmpty ? Color.clear : Color.accentColor.opacity(0.28))
-                            .overlay(
+                        if let wid = leaf.windowID {
+                            let info = windowManager.appInfo(for: wid)
+                            let isHovered = hoveredLeafID == leaf.leafID
+                            let iconSize = min(22, max(12, min(rw, rh) - 8))
+
+                            ZStack {
                                 RoundedRectangle(cornerRadius: 3)
-                                    .strokeBorder(
-                                        leaf.isEmpty ? Color.secondary.opacity(0.35) : Color.accentColor.opacity(0.8),
-                                        style: StrokeStyle(lineWidth: 1, dash: leaf.isEmpty ? [3, 2] : [])
+                                    .fill(Color.accentColor.opacity(isHovered ? 0.42 : 0.28))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .strokeBorder(
+                                                Color.accentColor.opacity(isHovered ? 1.0 : 0.8),
+                                                lineWidth: isHovered ? 1.25 : 1
+                                            )
                                     )
-                            )
+                                if let icon = info?.icon, rw >= 18, rh >= 18 {
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .interpolation(.high)
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: iconSize, height: iconSize)
+                                        .allowsHitTesting(false)
+                                }
+                            }
                             .frame(width: rw, height: rh)
+                            .contentShape(RoundedRectangle(cornerRadius: 3))
+                            .onTapGesture {
+                                windowManager.focusWindow(wid)
+                            }
+                            .onHover { hovering in
+                                hoveredLeafID = hovering ? leaf.leafID : (hoveredLeafID == leaf.leafID ? nil : hoveredLeafID)
+                            }
+                            .help(info?.appName.map { "Focus \($0)" } ?? "Focus Window")
                             .offset(x: rx + 1, y: ry + 1)
+                        } else {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.clear)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .strokeBorder(
+                                            Color.secondary.opacity(0.35),
+                                            style: StrokeStyle(lineWidth: 1, dash: [3, 2])
+                                        )
+                                )
+                                .frame(width: rw, height: rh)
+                                .offset(x: rx + 1, y: ry + 1)
+                        }
                     }
                 }
             }
@@ -166,14 +221,31 @@ struct MenuBarPopoverView: View {
                 set: { appState.setLaunchAtLogin($0) }
             ))
             .font(.subheadline)
+
+            if appState.launchAtLoginRequiresApproval {
+                HStack(alignment: .center, spacing: 6) {
+                    Text("Approval needed in System Settings → Login Items")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Button("Open Settings") {
+                        appState.openLoginItemsSettings()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+                }
+            }
         }
     }
 
     private var cheatSheet: some View {
         VStack(alignment: .leading, spacing: 4) {
-            row("⌥ / ⌃⌘ Drag", "Fill empty space, split edge, or swap center")
+            row("⌥ / ⌃⌘ Drag", "Fill, split pane, T-junction, or swap center")
             row("Normal Drag", "Detach to floating & expand neighbors")
-            row("Hover Seam", "Drag to resize · Double-click to collapse/50%")
+            row("Hover Seam", "Drag to resize (⇧ free) · 2× click 50%")
+            row("Esc", "Cancel active snap drag or seam resize")
         }
         .font(.caption)
     }

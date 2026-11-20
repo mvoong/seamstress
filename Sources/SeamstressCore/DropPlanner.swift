@@ -5,7 +5,9 @@ import Foundation
 public enum DropPreviewKind: Equatable, Sendable {
     case fill
     case split
+    case splitContainer
     case swap
+    case replace
 }
 
 /// Pure, resolved drop action for an Option-drag release at a cursor point.
@@ -60,7 +62,8 @@ public enum DropPlanner {
         draggedWindowID: WindowID,
         targetSpace: SpaceKey,
         tree: LayoutTree,
-        screenBounds: CGRect
+        screenBounds: CGRect,
+        isDraggedWindowTiled: Bool? = nil
     ) -> DropPlan? {
         guard screenBounds.contains(pointer) else { return nil }
 
@@ -68,11 +71,20 @@ public enum DropPlanner {
         // of a vertical seam (┬ / ┴) or left/right of a horizontal seam (├ / ┤) splits that
         // entire split container along the perpendicular axis.
         if let tHit = tJunctionHit(pointer: pointer, in: tree.root, bounds: screenBounds) {
+            let fallbackPreview = halfRect(of: tHit.containerBounds, edge: tHit.edge)
+            let preview = simulatedPreviewRect(
+                tree: tree,
+                draggedWindowID: draggedWindowID,
+                screenBounds: screenBounds,
+                fallback: fallbackPreview
+            ) { simulated in
+                simulated.splitNode(nodeID: tHit.nodeID, edge: tHit.edge, with: draggedWindowID)
+            }
             return DropPlan(
                 targetSpace: targetSpace,
                 action: .splitNode(nodeID: tHit.nodeID, edge: tHit.edge),
-                previewRect: halfRect(of: tHit.containerBounds, edge: tHit.edge),
-                previewKind: .split
+                previewRect: preview,
+                previewKind: .splitContainer
             )
         }
 
@@ -131,22 +143,49 @@ public enum DropPlanner {
         let centerRect = cell.insetBy(dx: centerInsetX, dy: centerInsetY)
 
         if centerRect.contains(pointer) {
+            let isTiled = isDraggedWindowTiled ?? tree.contains(windowID: draggedWindowID)
             return DropPlan(
                 targetSpace: targetSpace,
                 action: .swapOrReplace(leafID: leaf.leafID, targetWindowID: occupant),
                 previewRect: cell,
-                previewKind: .swap
+                previewKind: isTiled ? .swap : .replace
             )
         }
 
         let edge = nearestEdge(point: pointer, in: cell)
-        let preview = halfRect(of: cell, edge: edge)
+        let fallbackPreview = halfRect(of: cell, edge: edge)
+        let preview = simulatedPreviewRect(
+            tree: tree,
+            draggedWindowID: draggedWindowID,
+            screenBounds: screenBounds,
+            fallback: fallbackPreview
+        ) { simulated in
+            simulated.splitOccupied(leafID: leaf.leafID, edge: edge, with: draggedWindowID)
+        }
         return DropPlan(
             targetSpace: targetSpace,
             action: .splitOccupied(leafID: leaf.leafID, edge: edge),
             previewRect: preview,
             previewKind: .split
         )
+    }
+
+    /// Simulates a same-space move + old-leaf collapse on a copy of `tree` to produce a WYSIWYG
+    /// post-commit preview rect for `draggedWindowID`.
+    private static func simulatedPreviewRect(
+        tree: LayoutTree,
+        draggedWindowID: WindowID,
+        screenBounds: CGRect,
+        fallback: CGRect,
+        apply: (inout LayoutTree) -> Bool
+    ) -> CGRect {
+        guard let oldLeafID = tree.leafID(for: draggedWindowID) else {
+            return fallback
+        }
+        var simulated = tree
+        guard apply(&simulated) else { return fallback }
+        simulated.removeLeafAndCollapse(leafID: oldLeafID)
+        return simulated.windowFrames(in: screenBounds)[draggedWindowID] ?? fallback
     }
 
     /// Returns the closest edge if `point` lies inside one of the four edge bands of `rect`,

@@ -9,6 +9,8 @@ final class WindowManager: ObservableObject {
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var activeLayoutLeaves: [LeafPlacement] = []
     @Published private(set) var activeDisplayBounds: CGRect = .zero
+    @Published private(set) var activeDisplayName: String = ""
+    @Published private(set) var canEqualizeCurrentSpace: Bool = false
     @Published private(set) var tiledWindowCount: Int = 0
 
     private let displayObserver = DisplayObserver()
@@ -39,14 +41,23 @@ final class WindowManager: ObservableObject {
         var currentPlan: DropPlan?
         var detachUndo: DetachUndoSnapshot?
         var detachedAt: TimeInterval?
+        var cancelledRestoreFrames: [WindowID: CGRect]?
     }
 
     private struct SeamDragSession {
         let hit: SeamHit
         let screenBounds: CGRect
         let involvedPIDs: Set<pid_t>
+        let initialPoint: CGPoint
+        let initialRatios: [NodeID: CGFloat]
+        let grabOffsets: [NodeID: CGFloat]
+        var hasMoved: Bool = false
+        var lastPoint: CGPoint
+        var lastShiftDown: Bool = false
         var lastRatios: [NodeID: CGFloat]
         var lastCollapseTarget: SeamCollapseTarget = .none
+        var lastSnapKey: String = ""
+        var lastWasClamped: Bool = false
     }
 
     private var windowDrag: WindowDragSession?
@@ -61,6 +72,8 @@ final class WindowManager: ObservableObject {
     /// so transient WindowServer transitions never evict live tiled windows.
     private var sanitySweepSuppressedUntil: TimeInterval = 0
     private static let postWakeSweepGrace: TimeInterval = 2.5
+    private static let savedFloatingFramesDefaultsKey = "seamstress.savedFloatingFrames"
+    private static let maxPersistedFloatingFrames = 64
 
     init() {
         wireCallbacks()
@@ -73,6 +86,7 @@ final class WindowManager: ObservableObject {
         SkyLightBridge.shared.enableBackgroundCursor()
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), AXWindowBridge.axTimeout)
 
+        loadSavedFloatingFrames()
         displayObserver.refresh()
         displayObserver.startObserving()
         eventMonitor.start()
@@ -99,6 +113,8 @@ final class WindowManager: ObservableObject {
         pendingAdoptionRetry = nil
         adoptionRetryCount = 0
 
+        persistSavedFloatingFrames()
+        inputTap.setHasActiveWindowDragPreview(false)
         inputTap.stop()
         eventMonitor.stop()
         displayObserver.stopObserving()
@@ -107,6 +123,30 @@ final class WindowManager: ObservableObject {
         windowDrag = nil
         seamDrag = nil
         SeamstressLog.lifecycle.notice("Seamstress stopped")
+    }
+
+    /// Refresh menu-bar / standalone window state for the display under the cursor.
+    func refreshForMenuPresentation() {
+        updateMenuState()
+    }
+
+    /// Reset all splits in the active Space on the current display back to 50/50.
+    func equalizeCurrentSpaceLayout() {
+        guard let display = currentMenuDisplay() else { return }
+        guard let frames = store.equalizeSplits(in: display.spaceKey, screenBounds: display.usableFrameCG) else {
+            return
+        }
+        axBridge.applyFrames(frames, crossMonitorSafe: false)
+        SeamstressLog.layout.info("Equalized splits for space \(display.spaceKey.description, privacy: .public)")
+        refreshSeamsAndUI()
+    }
+
+    func appInfo(for windowID: WindowID) -> WindowAppInfo? {
+        axBridge.appInfo(for: windowID)
+    }
+
+    func focusWindow(_ windowID: WindowID) {
+        axBridge.focusWindow(windowID: windowID)
     }
 
     /// Clear all tiled slots on the display under the mouse (or primary display).
@@ -127,6 +167,7 @@ final class WindowManager: ObservableObject {
         displayObserver.onDisplaysOrSpacesChanged = { [weak self] topologyChanged in
             guard let self, self.isRunning else { return }
             self.dropOverlay.hide()
+            self.inputTap.setHasActiveWindowDragPreview(false)
             self.seamOverlay.hide()
             self.windowDrag = nil
             self.seamDrag = nil
@@ -144,6 +185,7 @@ final class WindowManager: ObservableObject {
             guard let self, self.isRunning else { return }
             if !isActive {
                 self.dropOverlay.hide()
+                self.inputTap.setHasActiveWindowDragPreview(false)
                 self.seamOverlay.hide()
                 self.windowDrag = nil
                 self.seamDrag = nil
@@ -194,6 +236,10 @@ final class WindowManager: ObservableObject {
             self?.handleHoverCandidate(hit, at: point)
         }
 
+        inputTap.onHoverCursorReassert = { [weak self] in
+            self?.seamOverlay.reassertCursor()
+        }
+
         inputTap.isSeamHitUnoccludedSync = { [weak self] hit, point in
             guard let self else { return false }
             return !self.axBridge.isSeamPointOccluded(point, allowedWindowIDs: hit.participatingWindowIDs)
@@ -208,12 +254,20 @@ final class WindowManager: ObservableObject {
             self?.handleSeamDragBegin(hit, at: point)
         }
 
-        inputTap.onSeamDragMove = { [weak self] _, point in
-            self?.handleSeamDragMove(to: point)
+        inputTap.onSeamDragMove = { [weak self] _, point, shiftDown in
+            self?.handleSeamDragMove(to: point, shiftDown: shiftDown)
+        }
+
+        inputTap.onSeamShiftChangedDuringDrag = { [weak self] shiftDown, point in
+            self?.handleSeamDragMove(to: point, shiftDown: shiftDown)
         }
 
         inputTap.onSeamDragEnd = { [weak self] _, point in
             self?.handleSeamDragEnd(at: point)
+        }
+
+        inputTap.onSeamDragCancel = { [weak self] in
+            self?.handleSeamDragCancel()
         }
 
         inputTap.onSeamDoubleClick = { [weak self] hit in
@@ -230,6 +284,10 @@ final class WindowManager: ObservableObject {
 
         inputTap.onWindowMouseUp = { [weak self] point, snapModifierDown in
             self?.handleWindowMouseUp(at: point, snapModifierDown: snapModifierDown)
+        }
+
+        inputTap.onWindowDragCancel = { [weak self] in
+            self?.handleWindowDragCancel()
         }
 
         inputTap.onSnapModifierChangedDuringDrag = { [weak self] snapModifierDown, point in
@@ -294,14 +352,24 @@ final class WindowManager: ObservableObject {
         axBridge.beginLiveResizeBatch(pids: pids)
 
         var ratios: [NodeID: CGFloat] = [:]
+        var grabOffsets: [NodeID: CGFloat] = [:]
         for seam in hit.allSeams {
             ratios[seam.splitID] = seam.ratio
+            grabOffsets[seam.splitID] = seam.axis == .vertical
+                ? (point.x - seam.seamPosition)
+                : (point.y - seam.seamPosition)
         }
 
         seamDrag = SeamDragSession(
             hit: hit,
             screenBounds: bounds,
             involvedPIDs: pids,
+            initialPoint: point,
+            initialRatios: ratios,
+            grabOffsets: grabOffsets,
+            hasMoved: false,
+            lastPoint: point,
+            lastShiftDown: NSEvent.modifierFlags.contains(.shift),
             lastRatios: ratios
         )
 
@@ -321,12 +389,23 @@ final class WindowManager: ObservableObject {
                 primaryScreenHeight: displayObserver.primaryScreenHeight
             )
         }
-        handleSeamDragMove(to: point)
     }
 
-    private func handleSeamDragMove(to point: CGPoint) {
+    private func handleSeamDragMove(to point: CGPoint, shiftDown: Bool) {
         guard var session = seamDrag else { return }
+        session.lastPoint = point
+        session.lastShiftDown = shiftDown
+
+        if !session.hasMoved {
+            guard hypot(point.x - session.initialPoint.x, point.y - session.initialPoint.y) >= 1.5 else {
+                seamDrag = session
+                return
+            }
+            session.hasMoved = true
+        }
+
         let tree = store.tree(for: session.hit.spaceKey)
+        let allSeams = SeamGeometry.seams(in: tree, spaceKey: session.hit.spaceKey, bounds: session.screenBounds)
 
         switch session.hit {
         case .single(let seam):
@@ -334,12 +413,22 @@ final class WindowManager: ObservableObject {
                 pointer: point,
                 seam: seam,
                 tree: tree,
-                minSizes: store.learnedMinSizes
+                minSizes: store.learnedMinSizes,
+                allSeams: allSeams,
+                disableSnapping: shiftDown,
+                grabOffset: session.grabOffsets[seam.splitID] ?? 0
             )
+            let wasCollapsing = session.lastCollapseTarget != .none
+            let isCollapsing = update.collapseTarget != .none
+            if !wasCollapsing && isCollapsing {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            }
             session.lastCollapseTarget = update.collapseTarget
 
             switch update.collapseTarget {
             case .collapseFirst(let expanded), .collapseSecond(let expanded):
+                session.lastSnapKey = ""
+                session.lastWasClamped = false
                 seamDrag = session
                 seamOverlay.showCollapsePreview(
                     expandedBoundsCG: expanded,
@@ -349,10 +438,23 @@ final class WindowManager: ObservableObject {
                 return
 
             case .none:
+                let snapKey = Self.snapFeedbackKey(for: update.snapKind)
+                if !snapKey.isEmpty && snapKey != session.lastSnapKey {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                }
+                session.lastSnapKey = snapKey
+
+                if update.isClamped && !session.lastWasClamped {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+                }
+                session.lastWasClamped = update.isClamped
+
                 seamOverlay.showSeam(
                     visualRectCG: update.visualRect,
                     axis: seam.axis,
                     isDragging: true,
+                    isClamped: update.isClamped,
+                    isSnapped: update.snapKind != .none,
                     primaryScreenHeight: displayObserver.primaryScreenHeight
                 )
                 let prevRatio = session.lastRatios[seam.splitID] ?? seam.ratio
@@ -377,13 +479,28 @@ final class WindowManager: ObservableObject {
 
             // Read live seams from the current tree so child splits' parentBounds reflect the
             // latest vertical/horizontal positions rather than stale drag-start bounds.
-            let liveSeams = SeamGeometry.seams(in: tree, spaceKey: session.hit.spaceKey, bounds: session.screenBounds)
-            let liveVs = liveSeams.filter { vIDs.contains($0.splitID) }
-            let liveHs = liveSeams.filter { hIDs.contains($0.splitID) }
+            let liveVs = allSeams.filter { vIDs.contains($0.splitID) }
+            let liveHs = allSeams.filter { hIDs.contains($0.splitID) }
 
             var changed = false
+            var anyClamped = false
+            var snapParts: [String] = []
+
+            let stationaryVSeams = allSeams.filter { !vIDs.contains($0.splitID) }
             for vSeam in liveVs {
-                let vUpdate = SeamGeometry.dragUpdate(pointer: point, seam: vSeam, tree: tree, minSizes: store.learnedMinSizes)
+                let vUpdate = SeamGeometry.dragUpdate(
+                    pointer: point,
+                    seam: vSeam,
+                    tree: tree,
+                    minSizes: store.learnedMinSizes,
+                    allSeams: stationaryVSeams,
+                    disableSnapping: shiftDown,
+                    grabOffset: session.grabOffsets[vSeam.splitID] ?? 0
+                )
+                if vUpdate.isClamped { anyClamped = true }
+                if vUpdate.snapKind != .none {
+                    snapParts.append("v:\(vSeam.splitID):\(Self.snapFeedbackKey(for: vUpdate.snapKind))")
+                }
                 let prev = session.lastRatios[vSeam.splitID] ?? vSeam.ratio
                 if abs(vUpdate.ratio - prev) >= 0.001 {
                     session.lastRatios[vSeam.splitID] = vUpdate.ratio
@@ -398,8 +515,22 @@ final class WindowManager: ObservableObject {
             }
 
             let treeAfterV = store.tree(for: session.hit.spaceKey)
+            let seamsAfterV = SeamGeometry.seams(in: treeAfterV, spaceKey: session.hit.spaceKey, bounds: session.screenBounds)
+            let stationaryHSeams = seamsAfterV.filter { !hIDs.contains($0.splitID) }
             for hSeam in liveHs {
-                let hUpdate = SeamGeometry.dragUpdate(pointer: point, seam: hSeam, tree: treeAfterV, minSizes: store.learnedMinSizes)
+                let hUpdate = SeamGeometry.dragUpdate(
+                    pointer: point,
+                    seam: hSeam,
+                    tree: treeAfterV,
+                    minSizes: store.learnedMinSizes,
+                    allSeams: stationaryHSeams,
+                    disableSnapping: shiftDown,
+                    grabOffset: session.grabOffsets[hSeam.splitID] ?? 0
+                )
+                if hUpdate.isClamped { anyClamped = true }
+                if hUpdate.snapKind != .none {
+                    snapParts.append("h:\(hSeam.splitID):\(Self.snapFeedbackKey(for: hUpdate.snapKind))")
+                }
                 let prev = session.lastRatios[hSeam.splitID] ?? hSeam.ratio
                 if abs(hUpdate.ratio - prev) >= 0.001 {
                     session.lastRatios[hSeam.splitID] = hUpdate.ratio
@@ -412,6 +543,17 @@ final class WindowManager: ObservableObject {
                     changed = true
                 }
             }
+
+            let snapKey = snapParts.joined(separator: "|")
+            if !snapKey.isEmpty && snapKey != session.lastSnapKey {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            }
+            session.lastSnapKey = snapKey
+
+            if anyClamped && !session.lastWasClamped {
+                NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+            }
+            session.lastWasClamped = anyClamped
             seamDrag = session
 
             // Compute fresh visual hairlines from the updated tree so both lines track the cursor
@@ -424,6 +566,8 @@ final class WindowManager: ObservableObject {
                 verticalVisualCG: unionVisualRect(of: updatedVs.isEmpty ? initialVs : updatedVs),
                 horizontalVisualCG: unionVisualRect(of: updatedHs.isEmpty ? initialHs : updatedHs),
                 isDragging: true,
+                isClamped: anyClamped,
+                isSnapped: !snapParts.isEmpty,
                 primaryScreenHeight: displayObserver.primaryScreenHeight
             )
             if changed {
@@ -433,10 +577,29 @@ final class WindowManager: ObservableObject {
         }
     }
 
+    private func handleSeamDragCancel() {
+        guard let session = seamDrag else { return }
+        seamDrag = nil
+        seamOverlay.hide()
+
+        let finalFrames = store.restoreSeamRatios(
+            session.initialRatios,
+            in: session.hit.spaceKey,
+            screenBounds: session.screenBounds
+        )
+        axBridge.endLiveResizeBatch(finalFrames: finalFrames, involvedPIDs: session.involvedPIDs)
+        refreshSeamsAndUI()
+    }
+
     private func handleSeamDragEnd(at point: CGPoint) {
         guard let session = seamDrag else { return }
         seamDrag = nil
         seamOverlay.hide()
+
+        guard session.hasMoved else {
+            axBridge.endLiveResizeBatch(finalFrames: [:], involvedPIDs: session.involvedPIDs)
+            return
+        }
 
         let finalFrames: [WindowID: CGRect]
         switch session.hit {
@@ -522,6 +685,7 @@ final class WindowManager: ObservableObject {
         guard isRunning else { return }
         seamOverlay.hide()
         dropOverlay.hide()
+        inputTap.setHasActiveWindowDragPreview(false)
 
         guard let top = axBridge.topWindow(at: point) else {
             windowDrag = nil
@@ -600,22 +764,29 @@ final class WindowManager: ObservableObject {
         }
 
         if snapModifierDown {
+            let previousAction = session.currentPlan?.action
             let plan = computeDropPlan(at: point, draggedWindowID: session.window.windowID)
             session.currentPlan = plan
             windowDrag = session
             if let plan {
+                if plan.action != previousAction {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                }
                 dropOverlay.show(
                     cgRect: plan.previewRect,
                     kind: plan.previewKind,
                     primaryScreenHeight: displayObserver.primaryScreenHeight
                 )
+                inputTap.setHasActiveWindowDragPreview(true)
             } else {
-                dropOverlay.hide()
+                dropOverlay.hide(animated: true)
+                inputTap.setHasActiveWindowDragPreview(false)
             }
         } else {
             session.currentPlan = nil
             windowDrag = session
-            dropOverlay.hide()
+            dropOverlay.hide(animated: true)
+            inputTap.setHasActiveWindowDragPreview(false)
         }
     }
 
@@ -636,20 +807,29 @@ final class WindowManager: ObservableObject {
                 }
             }
 
+            let previousAction = session.currentPlan?.action
             let plan = computeDropPlan(at: point, draggedWindowID: session.window.windowID)
             session.currentPlan = plan
             windowDrag = session
             if let plan {
+                if plan.action != previousAction {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                }
                 dropOverlay.show(
                     cgRect: plan.previewRect,
                     kind: plan.previewKind,
                     primaryScreenHeight: displayObserver.primaryScreenHeight
                 )
+                inputTap.setHasActiveWindowDragPreview(true)
+            } else {
+                dropOverlay.hide(animated: true)
+                inputTap.setHasActiveWindowDragPreview(false)
             }
         } else {
             session.currentPlan = nil
             windowDrag = session
-            dropOverlay.hide()
+            dropOverlay.hide(animated: true)
+            inputTap.setHasActiveWindowDragPreview(false)
 
             // If user started dragging a tiled window with a snap modifier held and then released it
             // mid-drag, detach it to floating right away.
@@ -666,10 +846,67 @@ final class WindowManager: ObservableObject {
         }
     }
 
+    private func handleWindowDragCancel() {
+        guard var session = windowDrag else { return }
+        dropOverlay.hide(animated: true)
+        inputTap.setHasActiveWindowDragPreview(false)
+        session.currentPlan = nil
+        session.phase = .ignored
+
+        var framesToRestore: [WindowID: CGRect] = [:]
+        if let undo = session.detachUndo {
+            session.detachUndo = nil
+            session.detachedAt = nil
+            if store.restoreDetachSnapshot(undo),
+               let bounds = displayObserver.usableBounds(for: undo.spaceKey) {
+                framesToRestore = store.frames(for: undo.spaceKey, screenBounds: bounds)
+            }
+        } else if let space = store.spaceKey(for: session.window.windowID),
+                  let bounds = displayObserver.usableBounds(for: space),
+                  let rect = store.frames(for: space, screenBounds: bounds)[session.window.windowID] {
+            framesToRestore = [session.window.windowID: rect]
+        }
+
+        if !framesToRestore.isEmpty {
+            session.cancelledRestoreFrames = framesToRestore
+            axBridge.applyFrames(framesToRestore, crossMonitorSafe: true)
+        }
+
+        windowDrag = session
+        refreshSeamsAndUI()
+    }
+
     private func handleWindowMouseUp(at point: CGPoint, snapModifierDown: Bool) {
-        dropOverlay.hide()
+        dropOverlay.hide(animated: true)
+        inputTap.setHasActiveWindowDragPreview(false)
         guard let session = windowDrag else { return }
         windowDrag = nil
+
+        if let restoreFrames = session.cancelledRestoreFrames {
+            // Re-apply after macOS finishes native mouse-up tracking so an Esc-cancelled drag
+            // snaps cleanly back to its pre-drag tile even if the pointer moved before release.
+            axBridge.applyFrames(restoreFrames, crossMonitorSafe: true) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
+                    guard let self, self.isRunning, self.windowDrag == nil else { return }
+                    var drifted: [WindowID: CGRect] = [:]
+                    for (wid, expected) in restoreFrames where self.store.isTiled(wid) {
+                        if let actual = self.axBridge.windowBounds(windowID: wid) {
+                            let drift = abs(actual.origin.x - expected.origin.x)
+                                + abs(actual.origin.y - expected.origin.y)
+                                + abs(actual.width - expected.width)
+                                + abs(actual.height - expected.height)
+                            if drift > 3 {
+                                drifted[wid] = expected
+                            }
+                        }
+                    }
+                    if !drifted.isEmpty {
+                        self.axBridge.applyFrames(drifted, crossMonitorSafe: true)
+                    }
+                }
+            }
+            return
+        }
 
         guard session.phase == .moving, snapModifierDown else { return }
 
@@ -684,6 +921,7 @@ final class WindowManager: ObservableObject {
                 self?.displayObserver.usableBounds(for: spaceKey)
             }
         )
+        persistSavedFloatingFrames()
 
         recordDeclaredMinSizeIfAvailable(for: session.window.windowID)
         SeamstressLog.layout.info("Committed drop for window \(session.window.windowID) into \(plan.targetSpace.description, privacy: .public)")
@@ -695,19 +933,46 @@ final class WindowManager: ObservableObject {
 
         let draggedID = session.window.windowID
         let targetForDragged = commit.framesToApply[draggedID]
+        let needsMultiWindowVerify = commit.affectedSpaces.count > 1 || !commit.detachedWindows.isEmpty
+        let detachedIDs = Set(commit.detachedWindows.keys)
+        let expectedAll = allFrames
 
         // Apply immediately, then verify once after macOS finishes its native mouse-up tracking.
         axBridge.applyFrames(allFrames, crossMonitorSafe: true) { [weak self] in
-            guard let self, let expected = targetForDragged else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
-                guard let self, self.isRunning, self.store.isTiled(draggedID) else { return }
-                if let actual = self.axBridge.windowBounds(windowID: draggedID) {
-                    let drift = abs(actual.origin.x - expected.origin.x)
-                        + abs(actual.origin.y - expected.origin.y)
-                        + abs(actual.width - expected.width)
-                        + abs(actual.height - expected.height)
-                    if drift > 3 {
-                        self.axBridge.applyFrames([draggedID: expected], crossMonitorSafe: true)
+            guard let self else { return }
+            if let expected = targetForDragged {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
+                    guard let self, self.isRunning, self.store.isTiled(draggedID) else { return }
+                    if let actual = self.axBridge.windowBounds(windowID: draggedID) {
+                        let drift = abs(actual.origin.x - expected.origin.x)
+                            + abs(actual.origin.y - expected.origin.y)
+                            + abs(actual.width - expected.width)
+                            + abs(actual.height - expected.height)
+                        if drift > 3 {
+                            self.axBridge.applyFrames([draggedID: expected], crossMonitorSafe: true)
+                        }
+                    }
+                }
+            }
+            if needsMultiWindowVerify {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) { [weak self] in
+                    guard let self, self.isRunning, self.windowDrag == nil, self.seamDrag == nil else { return }
+                    var drifted: [WindowID: CGRect] = [:]
+                    for (wid, expected) in expectedAll {
+                        guard self.store.isTiled(wid) || detachedIDs.contains(wid),
+                              let actual = self.axBridge.windowBounds(windowID: wid) else {
+                            continue
+                        }
+                        let drift = abs(actual.origin.x - expected.origin.x)
+                            + abs(actual.origin.y - expected.origin.y)
+                            + abs(actual.width - expected.width)
+                            + abs(actual.height - expected.height)
+                        if drift > 3 {
+                            drifted[wid] = expected
+                        }
+                    }
+                    if !drifted.isEmpty {
+                        self.axBridge.applyFrames(drifted, crossMonitorSafe: true)
                     }
                 }
             }
@@ -722,9 +987,17 @@ final class WindowManager: ObservableObject {
         currentFrame: CGRect,
         cursor: CGPoint
     ) -> DetachUndoSnapshot? {
-        guard let detached = store.detachByUserDrag(windowID: windowID, currentFrame: currentFrame, cursor: cursor) else {
+        let existingSpace = store.spaceKey(for: windowID)
+        let existingBounds = existingSpace.flatMap { displayObserver.usableBounds(for: $0) }
+        guard let detached = store.detachByUserDrag(
+            windowID: windowID,
+            currentFrame: currentFrame,
+            cursor: cursor,
+            screenBounds: existingBounds
+        ) else {
             return nil
         }
+        persistSavedFloatingFrames()
         var framesToApply: [WindowID: CGRect] = [:]
         if let bounds = displayObserver.usableBounds(for: detached.spaceKey) {
             for (wid, rect) in store.frames(for: detached.spaceKey, screenBounds: bounds) {
@@ -968,14 +1241,98 @@ final class WindowManager: ObservableObject {
         inputTap.updateTiledState(windowIDs: tiledIDs, pids: pids)
         eventMonitor.syncObservedPIDs(pids)
 
-        tiledWindowCount = tiledIDs.count
+        updateMenuState()
+    }
+
+    private func updateMenuState() {
+        tiledWindowCount = store.allTiledWindowIDs.count
         if let display = currentMenuDisplay() {
+            let tree = store.tree(for: display.spaceKey)
             activeDisplayBounds = display.usableFrameCG
-            activeLayoutLeaves = store.tree(for: display.spaceKey).leafPlacements(in: display.usableFrameCG)
+            activeDisplayName = display.localizedName
+            activeLayoutLeaves = tree.leafPlacements(in: display.usableFrameCG)
+            canEqualizeCurrentSpace = Self.hasUnequalSplit(in: tree.root)
         } else {
             activeDisplayBounds = .zero
+            activeDisplayName = ""
             activeLayoutLeaves = []
+            canEqualizeCurrentSpace = false
         }
+    }
+
+    private static func hasUnequalSplit(in node: LayoutTree.Node) -> Bool {
+        switch node {
+        case .empty, .window:
+            return false
+        case .split(_, _, let ratio, let first, let second):
+            if abs(ratio - 0.5) > 0.005 {
+                return true
+            }
+            return hasUnequalSplit(in: first) || hasUnequalSplit(in: second)
+        }
+    }
+
+    private static func snapFeedbackKey(for kind: SeamSnapKind) -> String {
+        switch kind {
+        case .none:
+            return ""
+        case .detent(let ratio):
+            return "detent:\(Int((ratio * 1000).rounded()))"
+        case .alignedSeam(let pos):
+            return "align:\(Int(pos.rounded()))"
+        }
+    }
+
+    private func loadSavedFloatingFrames() {
+        guard let stored = UserDefaults.standard.dictionary(forKey: Self.savedFloatingFramesDefaultsKey) as? [String: [Double]],
+              !stored.isEmpty else {
+            return
+        }
+        guard let list = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return
+        }
+        var liveWindowIDs: Set<WindowID> = []
+        liveWindowIDs.reserveCapacity(list.count)
+        for entry in list {
+            if let wid = entry[kCGWindowNumber as String] as? UInt32 {
+                liveWindowIDs.insert(wid)
+            }
+        }
+
+        var restored: [WindowID: CGRect] = [:]
+        for (key, coords) in stored {
+            guard let wid = WindowID(key),
+                  liveWindowIDs.contains(wid),
+                  coords.count == 4,
+                  coords.allSatisfy(\.isFinite),
+                  coords[2] > 0,
+                  coords[3] > 0 else {
+                continue
+            }
+            restored[wid] = CGRect(x: coords[0], y: coords[1], width: coords[2], height: coords[3])
+        }
+        if !restored.isEmpty {
+            store.restoreSavedFloatingFrames(restored)
+        }
+    }
+
+    private func persistSavedFloatingFrames() {
+        let snapshot = store.savedFloatingFramesSnapshot()
+        if snapshot.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.savedFloatingFramesDefaultsKey)
+            return
+        }
+        var encoded: [String: [Double]] = [:]
+        encoded.reserveCapacity(min(snapshot.count, Self.maxPersistedFloatingFrames))
+        for (wid, rect) in snapshot.prefix(Self.maxPersistedFloatingFrames) {
+            encoded[String(wid)] = [
+                Double(rect.origin.x),
+                Double(rect.origin.y),
+                Double(rect.size.width),
+                Double(rect.size.height),
+            ]
+        }
+        UserDefaults.standard.set(encoded, forKey: Self.savedFloatingFramesDefaultsKey)
     }
 
     private func currentMenuDisplay() -> DisplayInfo? {

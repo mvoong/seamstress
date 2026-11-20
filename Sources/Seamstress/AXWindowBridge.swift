@@ -13,6 +13,12 @@ struct CGWindowSnapshot: Equatable {
     let ownerName: String?
 }
 
+struct WindowAppInfo: Equatable {
+    let pid: pid_t
+    let appName: String?
+    let icon: NSImage?
+}
+
 /// High-performance Accessibility & WindowServer bridge.
 ///
 /// Design for responsiveness:
@@ -121,6 +127,36 @@ final class AXWindowBridge {
         lock.unlock()
         if let cached { return cached }
         return onScreenNormalWindows().first(where: { $0.windowID == windowID })?.ownerPID
+    }
+
+    func appInfo(for windowID: WindowID) -> WindowAppInfo? {
+        guard let pid = pid(for: windowID) else { return nil }
+        let app = NSRunningApplication(processIdentifier: pid)
+        return WindowAppInfo(pid: pid, appName: app?.localizedName, icon: app?.icon)
+    }
+
+    /// Bring `windowID` and its owning application to the front without blocking the main thread on AX IPC.
+    func focusWindow(windowID: WindowID) {
+        guard let pid = pid(for: windowID) else { return }
+
+        if Thread.isMainThread {
+            NSRunningApplication(processIdentifier: pid)?.activate(options: .activateIgnoringOtherApps)
+        } else {
+            DispatchQueue.main.async {
+                NSRunningApplication(processIdentifier: pid)?.activate(options: .activateIgnoringOtherApps)
+            }
+        }
+
+        let q = queue(for: pid)
+        q.async { [weak self] in
+            guard let self, let el = self.resolveElement(windowID: windowID, pid: pid) else { return }
+            AXUIElementSetMessagingTimeout(el, Self.axTimeout)
+            let raiseErr = AXUIElementPerformAction(el, kAXRaiseAction as CFString)
+            let mainErr = AXUIElementSetAttributeValue(el, kAXMainAttribute as CFString, kCFBooleanTrue)
+            if raiseErr == .invalidUIElement || mainErr == .invalidUIElement {
+                self.forget(windowID: windowID)
+            }
+        }
     }
 
     func register(windowID: WindowID, pid: pid_t, element: AXUIElement? = nil) {

@@ -75,6 +75,18 @@ public final class SpaceLayoutStore {
         savedFloatingFrames[windowID]
     }
 
+    /// Snapshot of all saved pre-tiled floating frames for persistence across relaunches.
+    public func savedFloatingFramesSnapshot() -> [WindowID: CGRect] {
+        savedFloatingFrames
+    }
+
+    /// Restore persisted floating frames, filling only entries not already present.
+    public func restoreSavedFloatingFrames(_ frames: [WindowID: CGRect]) {
+        for (wid, frame) in frames where savedFloatingFrames[wid] == nil {
+            savedFloatingFrames[wid] = frame
+        }
+    }
+
     public func recordMinimumSize(_ size: CGSize, for windowID: WindowID) {
         let existing = learnedMinSizes[windowID] ?? .zero
         learnedMinSizes[windowID] = CGSize(
@@ -106,7 +118,8 @@ public final class SpaceLayoutStore {
             draggedWindowID: draggedWindowID,
             targetSpace: targetSpace,
             tree: targetTree,
-            screenBounds: screenBounds
+            screenBounds: screenBounds,
+            isDraggedWindowTiled: windowToSpace[draggedWindowID] != nil
         )
     }
 
@@ -228,7 +241,8 @@ public final class SpaceLayoutStore {
     public func detachByUserDrag(
         windowID: WindowID,
         currentFrame: CGRect,
-        cursor: CGPoint
+        cursor: CGPoint,
+        screenBounds: CGRect? = nil
     ) -> (restoredFrame: CGRect?, spaceKey: SpaceKey, undo: DetachUndoSnapshot)? {
         guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
         let previousTree = tree(for: space)
@@ -242,6 +256,19 @@ public final class SpaceLayoutStore {
         if let saved = savedFrame {
             restored = CGRect.restoredUnderCursor(
                 savedSize: saved.size,
+                currentFrame: currentFrame,
+                cursor: cursor
+            )
+        } else if let screenBounds,
+                  screenBounds.width > 0,
+                  screenBounds.height > 0,
+                  (currentFrame.width * currentFrame.height) >= (screenBounds.width * screenBounds.height) * 0.85 {
+            let fallbackSize = CGSize(
+                width: min(960, screenBounds.width * 0.65),
+                height: min(700, screenBounds.height * 0.72)
+            )
+            restored = CGRect.restoredUnderCursor(
+                savedSize: fallbackSize,
                 currentFrame: currentFrame,
                 cursor: cursor
             )
@@ -330,6 +357,32 @@ public final class SpaceLayoutStore {
     ) -> [WindowID: CGRect]? {
         var t = tree(for: spaceKey)
         guard t.handleSeamDoubleClick(splitID: splitID) else { return nil }
+        store(t, for: spaceKey)
+        return t.windowFrames(in: screenBounds)
+    }
+
+    /// Equalize all splits in `spaceKey` back to 0.5 and return updated frames, or `nil` if nothing changed.
+    public func equalizeSplits(
+        in spaceKey: SpaceKey,
+        screenBounds: CGRect
+    ) -> [WindowID: CGRect]? {
+        guard var t = trees[spaceKey], !t.isEmpty else { return nil }
+        guard t.equalizeSplits() else { return nil }
+        store(t, for: spaceKey)
+        return t.windowFrames(in: screenBounds)
+    }
+
+    /// Restore a space's split ratios back to pre-drag values (e.g. on Escape cancel)
+    /// and return the resulting window frames.
+    public func restoreSeamRatios(
+        _ ratios: [NodeID: CGFloat],
+        in spaceKey: SpaceKey,
+        screenBounds: CGRect
+    ) -> [WindowID: CGRect] {
+        guard var t = trees[spaceKey], !t.isEmpty else { return [:] }
+        for (splitID, ratio) in ratios {
+            t.setRatio(splitID: splitID, ratio: ratio)
+        }
         store(t, for: spaceKey)
         return t.windowFrames(in: screenBounds)
     }

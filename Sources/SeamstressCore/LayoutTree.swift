@@ -410,6 +410,22 @@ public struct LayoutTree: Equatable, Sendable {
         return setRatio(splitID: splitID, ratio: 0.5)
     }
 
+    /// Reset every `.split` node's ratio to `0.5`. Returns `true` if any split changed by `> 0.001`.
+    @discardableResult
+    public mutating func equalizeSplits() -> Bool {
+        var changed = false
+        root = mapNode(root) { node in
+            guard case .split(let id, let axis, let ratio, let first, let second) = node else {
+                return node
+            }
+            if abs(ratio - 0.5) > 0.001 {
+                changed = true
+            }
+            return .split(id: id, axis: axis, ratio: 0.5, first: first, second: second)
+        }
+        return changed
+    }
+
     // MARK: - Helpers
 
     private func mapNode(_ node: Node, transform: (Node) -> Node) -> Node {

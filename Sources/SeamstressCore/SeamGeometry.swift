@@ -116,12 +116,37 @@ public enum SeamHit: Equatable, Sendable {
     }
 }
 
+/// Magnetic snap feedback for a live seam drag.
+public enum SeamSnapKind: Equatable, Sendable {
+    case none
+    case detent(CGFloat)
+    case alignedSeam(CGFloat)
+}
+
 /// Result of computing a live seam drag update for a cursor position.
 public struct SeamDragUpdate: Equatable, Sendable {
     public let ratio: CGFloat
     public let seamPosition: CGFloat
     public let visualRect: CGRect
     public let collapseTarget: SeamCollapseTarget
+    public let isClamped: Bool
+    public let snapKind: SeamSnapKind
+
+    public init(
+        ratio: CGFloat,
+        seamPosition: CGFloat,
+        visualRect: CGRect,
+        collapseTarget: SeamCollapseTarget,
+        isClamped: Bool = false,
+        snapKind: SeamSnapKind = .none
+    ) {
+        self.ratio = ratio
+        self.seamPosition = seamPosition
+        self.visualRect = visualRect
+        self.collapseTarget = collapseTarget
+        self.isClamped = isClamped
+        self.snapKind = snapKind
+    }
 }
 
 public enum SeamGeometry {
@@ -133,6 +158,8 @@ public enum SeamGeometry {
     public static let defaultMinLeafDimension: CGFloat = 140
     /// Dragging past 90% toward an empty side triggers collapse-on-release.
     public static let collapseThreshold: CGFloat = 0.90
+    /// Magnetic snap tolerance in points for detents and co-linear seam alignment.
+    public static let snapTolerancePoints: CGFloat = 7
 
     /// Extract all visible draggable seams from `tree` in `bounds`.
     public static func seams(in tree: LayoutTree, spaceKey: SpaceKey, bounds: CGRect) -> [VisibleSeam] {
@@ -272,12 +299,15 @@ public enum SeamGeometry {
         }
     }
 
-    /// Compute the clamped ratio, hairline rect, and collapse state for a live seam drag.
+    /// Compute the clamped ratio, hairline rect, snap feedback, and collapse state for a live seam drag.
     public static func dragUpdate(
         pointer: CGPoint,
         seam: VisibleSeam,
         tree: LayoutTree,
-        minSizes: [WindowID: CGSize]
+        minSizes: [WindowID: CGSize],
+        allSeams: [VisibleSeam] = [],
+        disableSnapping: Bool = false,
+        grabOffset: CGFloat = 0
     ) -> SeamDragUpdate {
         let parentStart: CGFloat
         let parentLength: CGFloat
@@ -303,7 +333,8 @@ public enum SeamGeometry {
             )
         }
 
-        let rawRatio = (cursorCoord - parentStart) / parentLength
+        let adjustedCursorCoord = cursorCoord - grabOffset
+        let rawRatio = (adjustedCursorCoord - parentStart) / parentLength
 
         // Check collapse threshold toward an empty child before clamping
         if seam.firstIsEmpty && rawRatio <= (1.0 - collapseThreshold) {
@@ -322,6 +353,45 @@ public enum SeamGeometry {
                 visualRect: visualRect(axis: seam.axis, parentBounds: seam.parentBounds, seamPosition: endPos),
                 collapseTarget: .collapseSecond(expandedBounds: seam.parentBounds)
             )
+        }
+
+        // Apply magnetic snapping (co-linear sibling seams first, then ratio detents)
+        var desiredRatio = rawRatio
+        var snapKind: SeamSnapKind = .none
+
+        if !disableSnapping {
+            let parentEnd = parentStart + parentLength
+            var bestAligned: (position: CGFloat, dist: CGFloat)?
+            for other in allSeams {
+                guard other.spaceKey == seam.spaceKey,
+                      other.axis == seam.axis,
+                      other.splitID != seam.splitID,
+                      other.seamPosition > parentStart,
+                      other.seamPosition < parentEnd else {
+                    continue
+                }
+                let dist = abs(other.seamPosition - adjustedCursorCoord)
+                if dist <= snapTolerancePoints {
+                    if bestAligned == nil || dist < bestAligned!.dist {
+                        bestAligned = (other.seamPosition, dist)
+                    }
+                }
+            }
+
+            if let aligned = bestAligned {
+                desiredRatio = (aligned.position - parentStart) / parentLength
+                snapKind = .alignedSeam(aligned.position)
+            } else {
+                let detents: [CGFloat] = [0.5, 1.0 / 3.0, 2.0 / 3.0]
+                for d in detents {
+                    let detentPos = parentStart + d * parentLength
+                    if abs(detentPos - adjustedCursorCoord) <= snapTolerancePoints {
+                        desiredRatio = d
+                        snapKind = .detent(d)
+                        break
+                    }
+                }
+            }
         }
 
         // Compute safe ratio bounds from subtree minimum extents
@@ -346,13 +416,32 @@ public enum SeamGeometry {
             }
         }
 
-        let clampedRatio = min(max(rawRatio, minRatio), maxRatio)
+        let clampedRatio = min(max(desiredRatio, minRatio), maxRatio)
+        let isClamped = abs(clampedRatio - desiredRatio) > 0.002
+        if isClamped {
+            switch snapKind {
+            case .none:
+                break
+            case .detent(let d):
+                if abs(clampedRatio - d) > 0.002 {
+                    snapKind = .none
+                }
+            case .alignedSeam(let pos):
+                let snapRatio = (pos - parentStart) / parentLength
+                if abs(clampedRatio - snapRatio) > 0.002 {
+                    snapKind = .none
+                }
+            }
+        }
+
         let (_, _, seamPos) = seam.parentBounds.splitFlush(axis: seam.axis, ratio: clampedRatio)
         return SeamDragUpdate(
             ratio: clampedRatio,
             seamPosition: seamPos,
             visualRect: visualRect(axis: seam.axis, parentBounds: seam.parentBounds, seamPosition: seamPos),
-            collapseTarget: .none
+            collapseTarget: .none,
+            isClamped: isClamped,
+            snapKind: snapKind
         )
     }
 
