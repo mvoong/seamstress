@@ -54,6 +54,8 @@ final class WindowManager: ObservableObject {
     /// Spaces already probed for existing tiled layouts since launch (so manually cleared
     /// Spaces are never re-adopted on later Space switches).
     private var probedSpaces: Set<SpaceKey> = []
+    private var pendingAdoptionRetry: DispatchWorkItem?
+    private var adoptionRetryCount: Int = 0
     private var pendingTopologyReapply: DispatchWorkItem?
     /// Suppresses `runSanitySweep()` briefly after wake, unlock, or display topology changes
     /// so transient WindowServer transitions never evict live tiled windows.
@@ -93,6 +95,9 @@ final class WindowManager: ObservableObject {
         isRunning = false
         pendingTopologyReapply?.cancel()
         pendingTopologyReapply = nil
+        pendingAdoptionRetry?.cancel()
+        pendingAdoptionRetry = nil
+        adoptionRetryCount = 0
 
         inputTap.stop()
         eventMonitor.stop()
@@ -785,9 +790,9 @@ final class WindowManager: ObservableObject {
         guard !onScreen.isEmpty else { return }
         let snapByID = Dictionary(uniqueKeysWithValues: onScreen.map { ($0.windowID, $0) })
 
+        var needsRetry = false
         for display in unprobed {
             let spaceKey = display.spaceKey
-            probedSpaces.insert(spaceKey)
 
             let usable = display.usableFrameCG
             let full = display.fullFrameCG
@@ -805,15 +810,38 @@ final class WindowManager: ObservableObject {
             }
 
             guard let reconstructed = LayoutReconstructor.reconstruct(windows: candidates, in: usable) else {
+                probedSpaces.insert(spaceKey)
                 continue
             }
 
             let matchedIDs = reconstructed.allWindowIDs
-            let allTileable = matchedIDs.allSatisfy { wid in
-                guard let snap = snapByID[wid] else { return false }
-                return axBridge.isStandardTileableWindow(windowID: wid, pid: snap.ownerPID)
+            var sawTransientFailure = false
+            var sawNonStandard = false
+            for wid in matchedIDs {
+                guard let snap = snapByID[wid] else {
+                    sawTransientFailure = true
+                    break
+                }
+                switch axBridge.checkTileability(windowID: wid, pid: snap.ownerPID, timeout: 0.6) {
+                case .tileable:
+                    break
+                case .nonStandard:
+                    SeamstressLog.layout.info("Skipped adoption in \(spaceKey.description, privacy: .public): window \(wid) (\(snap.ownerName ?? "?", privacy: .public)) is non-standard")
+                    sawNonStandard = true
+                case .unavailable:
+                    SeamstressLog.layout.info("Deferring adoption in \(spaceKey.description, privacy: .public): AX unavailable/timed out for window \(wid) (\(snap.ownerName ?? "?", privacy: .public))")
+                    sawTransientFailure = true
+                }
+                if sawNonStandard || sawTransientFailure { break }
             }
-            guard allTileable else { continue }
+
+            if sawTransientFailure {
+                // Don't permanently mark this Space probed when an app momentarily timed out on AX.
+                needsRetry = true
+                continue
+            }
+            probedSpaces.insert(spaceKey)
+            guard !sawNonStandard else { continue }
 
             let adopted = store.adoptReconstructedTree(reconstructed, for: spaceKey)
             for wid in adopted {
@@ -825,6 +853,18 @@ final class WindowManager: ObservableObject {
             if !adopted.isEmpty {
                 SeamstressLog.layout.notice("Adopted \(adopted.count) existing tiled window(s) in \(spaceKey.description, privacy: .public)")
             }
+        }
+
+        if needsRetry, adoptionRetryCount < 3 {
+            adoptionRetryCount += 1
+            pendingAdoptionRetry?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.isRunning else { return }
+                self.adoptExistingLayoutsIfNeeded()
+                self.refreshSeamsAndUI()
+            }
+            pendingAdoptionRetry = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
         }
     }
 

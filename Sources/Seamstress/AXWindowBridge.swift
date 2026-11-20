@@ -155,7 +155,7 @@ final class AXWindowBridge {
     }
 
     /// Resolve and cache the `AXUIElement` for `(windowID, pid)`.
-    func resolveElement(windowID: WindowID, pid: pid_t) -> AXUIElement? {
+    func resolveElement(windowID: WindowID, pid: pid_t, timeout: Float = AXWindowBridge.axTimeout) -> AXUIElement? {
         lock.lock()
         if let cached = elementCache[windowID], cached.pid == pid {
             lock.unlock()
@@ -164,7 +164,7 @@ final class AXWindowBridge {
         lock.unlock()
 
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, Self.axTimeout)
+        AXUIElementSetMessagingTimeout(app, timeout)
 
         var value: AnyObject?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
@@ -187,31 +187,45 @@ final class AXWindowBridge {
         return matched
     }
 
-    /// Check if a window is a standard resizable window (skipping sheets, popovers, system dialogs).
-    func isStandardTileableWindow(windowID: WindowID, pid: pid_t) -> Bool {
-        guard let el = resolveElement(windowID: windowID, pid: pid) else { return false }
-        AXUIElementSetMessagingTimeout(el, Self.axTimeout)
+    enum TileabilityResult {
+        case tileable
+        case nonStandard
+        case unavailable
+    }
+
+    /// Check if a window is a standard resizable window (skipping sheets, popovers, system dialogs),
+    /// distinguishing definitive non-standard windows from transient AX timeouts/unavailability.
+    func checkTileability(windowID: WindowID, pid: pid_t, timeout: Float = AXWindowBridge.axTimeout) -> TileabilityResult {
+        guard let el = resolveElement(windowID: windowID, pid: pid, timeout: timeout) else {
+            return .unavailable
+        }
+        AXUIElementSetMessagingTimeout(el, timeout)
 
         var roleObj: AnyObject?
         if AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleObj) == .success,
            let role = roleObj as? String,
            role != (kAXWindowRole as String) {
-            return false
+            return .nonStandard
         }
 
         var subroleObj: AnyObject?
         if AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &subroleObj) == .success,
            let subrole = subroleObj as? String,
            subrole != (kAXStandardWindowSubrole as String) {
-            return false
+            return .nonStandard
         }
 
         var resizable = DarwinBoolean(false)
         if AXUIElementIsAttributeSettable(el, kAXSizeAttribute as CFString, &resizable) == .success,
            !resizable.boolValue {
-            return false
+            return .nonStandard
         }
-        return true
+        return .tileable
+    }
+
+    /// Check if a window is a standard resizable window (skipping sheets, popovers, system dialogs).
+    func isStandardTileableWindow(windowID: WindowID, pid: pid_t) -> Bool {
+        checkTileability(windowID: windowID, pid: pid) == .tileable
     }
 
     /// Read current AX frame (or fallback to CG bounds).

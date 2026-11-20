@@ -77,4 +77,20 @@ final class LayoutReconstructorTests: XCTestCase {
         ]
         XCTAssertNil(LayoutReconstructor.reconstruct(windows: corner, in: screen))
     }
+
+    func testReconstructsFourHorizontalColumnsWithFloatingWindowsOnTop() {
+        let ultrawide = CGRect(x: 0, y: 30, width: 3440, height: 1344)
+        let windows = [
+            WindowCandidate(windowID: 100, frame: CGRect(x: 914, y: 900, width: 597, height: 385)),
+            WindowCandidate(windowID: 1, frame: CGRect(x: 0, y: 30, width: 1385, height: 1344)),
+            WindowCandidate(windowID: 101, frame: CGRect(x: 1568, y: 551, width: 1641, height: 672)),
+            WindowCandidate(windowID: 102, frame: CGRect(x: 572, y: 275, width: 756, height: 949)),
+            WindowCandidate(windowID: 4, frame: CGRect(x: 2709, y: 30, width: 731, height: 1343)),
+            WindowCandidate(windowID: 3, frame: CGRect(x: 1978, y: 30, width: 731, height: 1343)),
+            WindowCandidate(windowID: 2, frame: CGRect(x: 1385, y: 30, width: 593, height: 1343)),
+        ]
+        let tree = LayoutReconstructor.reconstruct(windows: windows, in: ultrawide)
+        XCTAssertNotNil(tree)
+        XCTAssertEqual(Set(tree?.allWindowIDs ?? []), [1, 2, 3, 4])
+    }
 }
