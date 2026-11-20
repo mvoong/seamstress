@@ -77,4 +77,19 @@ final class SpaceLayoutStoreTests: XCTestCase {
         XCTAssertEqual(result.framesToApply[1], boundsB)
         XCTAssertEqual(result.framesToApply[2], boundsA)
     }
+
+    func testDraggingWindowFromVerticalSplitToTopTJunctionConvertsToHorizontalSplit() {
+        let store = SpaceLayoutStore()
+        let p1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+        let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+
+        // Drag window 1 to the top T-junction (500, 10) of [1 | 2] -> becomes [1 / 2]
+        let tPlan = store.planDrop(pointer: CGPoint(x: 500, y: 10), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        let commit = store.commitDrop(tPlan, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+
+        XCTAssertEqual(commit.framesToApply[1], CGRect(x: 0, y: 0, width: 1000, height: 400))
+        XCTAssertEqual(commit.framesToApply[2], CGRect(x: 0, y: 400, width: 1000, height: 400))
+    }
 }

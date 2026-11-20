@@ -203,6 +203,26 @@ public struct LayoutTree: Equatable, Sendable {
         return applied
     }
 
+    /// Split any node (leaf or existing `.split` subtree) 50/50 along `edge`, placing
+    /// `incomingWindowID` on `edge`'s half and keeping the existing subtree on the opposite half.
+    @discardableResult
+    public mutating func splitNode(nodeID: NodeID, edge: SplitEdge, with incomingWindowID: WindowID) -> Bool {
+        var applied = false
+        let splitID = allocID()
+        let newLeafID = allocID()
+        root = mapNode(root) { node in
+            guard node.id == nodeID else { return node }
+            applied = true
+            let incomingNode: Node = .window(id: newLeafID, windowID: incomingWindowID)
+            if edge.isFirstChild {
+                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: incomingNode, second: node)
+            } else {
+                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: node, second: incomingNode)
+            }
+        }
+        return applied
+    }
+
     /// Split an occupied leaf 50/50 along `edge`, placing `incomingWindowID` on `edge`'s half
     /// and keeping the existing window on the opposite half.
     @discardableResult
@@ -295,24 +315,37 @@ public struct LayoutTree: Equatable, Sendable {
     /// If `windowID` was the only leaf in the tree, resets to an empty root.
     @discardableResult
     public mutating func removeWindowAndCollapse(_ windowID: WindowID) -> Bool {
-        guard contains(windowID: windowID) else { return false }
-        if let collapsed = pruneWindow(windowID, in: root) {
+        guard let id = leafID(for: windowID) else { return false }
+        return removeLeafAndCollapse(leafID: id)
+    }
+
+    /// Remove the leaf with `leafID` and immediately promote its sibling to fill the vacated space.
+    @discardableResult
+    public mutating func removeLeafAndCollapse(leafID: NodeID) -> Bool {
+        var removed = false
+        if let collapsed = pruneLeaf(leafID, in: root, removed: &removed) {
+            guard removed else { return false }
             root = collapseDoubleEmpty(collapsed)
         } else {
+            guard removed else { return false }
             root = .empty(id: allocID())
         }
         return true
     }
 
-    private func pruneWindow(_ target: WindowID, in node: Node) -> Node? {
+    private func pruneLeaf(_ targetLeafID: NodeID, in node: Node, removed: inout Bool) -> Node? {
         switch node {
         case .empty:
             return node
-        case .window(_, let wid):
-            return wid == target ? nil : node
+        case .window(let id, _):
+            if id == targetLeafID {
+                removed = true
+                return nil
+            }
+            return node
         case .split(let id, let axis, let ratio, let first, let second):
-            let newFirst = pruneWindow(target, in: first)
-            let newSecond = pruneWindow(target, in: second)
+            let newFirst = pruneLeaf(targetLeafID, in: first, removed: &removed)
+            let newSecond = pruneLeaf(targetLeafID, in: second, removed: &removed)
             switch (newFirst, newSecond) {
             case (nil, nil):
                 return nil

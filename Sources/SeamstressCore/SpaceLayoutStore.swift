@@ -136,18 +136,23 @@ public final class SpaceLayoutStore {
             store(t, for: targetSpace)
 
         case .fillEmpty(let leafID):
-            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace) { t in
+            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: false) { t in
                 t.fillEmpty(leafID: leafID, with: draggedWindowID)
             }
 
         case .splitEmpty(let leafID, let edge):
-            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace) { t in
+            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: false) { t in
                 t.splitEmpty(leafID: leafID, edge: edge, with: draggedWindowID)
             }
 
         case .splitOccupied(let leafID, let edge):
-            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace) { t in
+            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: true) { t in
                 t.splitOccupied(leafID: leafID, edge: edge, with: draggedWindowID)
+            }
+
+        case .splitNode(let nodeID, let edge):
+            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: true) { t in
+                t.splitNode(nodeID: nodeID, edge: edge, with: draggedWindowID)
             }
 
         case .swapOrReplace(let targetLeafID, let targetWindowID):
@@ -296,6 +301,7 @@ public final class SpaceLayoutStore {
         _ windowID: WindowID,
         from sourceSpace: SpaceKey?,
         to targetSpace: SpaceKey,
+        collapseOld: Bool,
         insert: (inout LayoutTree) -> Bool
     ) {
         if sourceSpace == targetSpace {
@@ -303,14 +309,22 @@ public final class SpaceLayoutStore {
             let oldLeafID = t.leafID(for: windowID)
             guard insert(&t) else { return }
             if let oldLeafID {
-                t.removeLeaf(leafID: oldLeafID)
+                if collapseOld {
+                    t.removeLeafAndCollapse(leafID: oldLeafID)
+                } else {
+                    t.removeLeaf(leafID: oldLeafID)
+                }
             }
             store(t, for: targetSpace)
             windowToSpace[windowID] = targetSpace
         } else {
             if let sourceSpace {
                 var src = tree(for: sourceSpace)
-                src.removeWindow(windowID)
+                if collapseOld {
+                    src.removeWindowAndCollapse(windowID)
+                } else {
+                    src.removeWindow(windowID)
+                }
                 store(src, for: sourceSpace)
             }
             var dst = tree(for: targetSpace)

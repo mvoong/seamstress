@@ -17,6 +17,8 @@ public struct DropPlan: Equatable, Sendable {
         case splitEmpty(leafID: NodeID, edge: SplitEdge)
         /// Split an occupied slot 50/50 along `edge`.
         case splitOccupied(leafID: NodeID, edge: SplitEdge)
+        /// Split an entire `.split` container 50/50 along `edge` (triggered near its T-junction).
+        case splitNode(nodeID: NodeID, edge: SplitEdge)
         /// Swap with an occupied slot (or replace if dragged window is floating).
         case swapOrReplace(leafID: NodeID, targetWindowID: WindowID)
         /// Dragged tiled window dropped back onto the center of its own slot.
@@ -48,6 +50,11 @@ public enum DropPlanner {
     /// Center box fraction for occupied slots (inner 36% swaps; outer bands split 50/50).
     public static let occupiedCenterFraction: CGFloat = 0.36
 
+    /// Half-width along the seam perpendicular to the T edge (±52pt around the seam line).
+    public static let tJunctionHalfSpan: CGFloat = 52
+    /// Depth inward from the split container's outer edge for T-junction targeting.
+    public static let tJunctionMaxDepth: CGFloat = 68
+
     public static func plan(
         pointer: CGPoint,
         draggedWindowID: WindowID,
@@ -55,6 +62,20 @@ public enum DropPlanner {
         tree: LayoutTree,
         screenBounds: CGRect
     ) -> DropPlan? {
+        guard screenBounds.contains(pointer) else { return nil }
+
+        // Check T-junctions of existing `.split` containers first: dragging near the top/bottom
+        // of a vertical seam (┬ / ┴) or left/right of a horizontal seam (├ / ┤) splits that
+        // entire split container along the perpendicular axis.
+        if let tHit = tJunctionHit(pointer: pointer, in: tree.root, bounds: screenBounds) {
+            return DropPlan(
+                targetSpace: targetSpace,
+                action: .splitNode(nodeID: tHit.nodeID, edge: tHit.edge),
+                previewRect: halfRect(of: tHit.containerBounds, edge: tHit.edge),
+                previewKind: .split
+            )
+        }
+
         guard let leaf = tree.leaf(at: pointer, in: screenBounds) else {
             return nil
         }
@@ -171,5 +192,85 @@ public enum DropPlanner {
     private static func halfRect(of cell: CGRect, edge: SplitEdge) -> CGRect {
         let (first, second, _) = cell.splitFlush(axis: edge.axis, ratio: 0.5)
         return edge.isFirstChild ? first : second
+    }
+
+    // MARK: - Split T-junction detection
+
+    private struct TJunctionCandidate {
+        let nodeID: NodeID
+        let edge: SplitEdge
+        let containerBounds: CGRect
+        let distance: CGFloat
+        let depth: Int
+    }
+
+    private static func tJunctionHit(
+        pointer: CGPoint,
+        in root: LayoutTree.Node,
+        bounds: CGRect
+    ) -> TJunctionCandidate? {
+        var best: TJunctionCandidate?
+        collectTJunctions(node: root, bounds: bounds, depth: 0, pointer: pointer, best: &best)
+        return best
+    }
+
+    private static func collectTJunctions(
+        node: LayoutTree.Node,
+        bounds: CGRect,
+        depth: Int,
+        pointer: CGPoint,
+        best: inout TJunctionCandidate?
+    ) {
+        guard case .split(let id, let axis, let ratio, let first, let second) = node else { return }
+        guard bounds.contains(pointer) else { return }
+
+        let (firstRect, secondRect, seamPos) = bounds.splitFlush(axis: axis, ratio: ratio)
+
+        // Only offer T-junction container splitting when both sides of the split are occupied
+        // (or at least non-trivial); if one side is empty, normal empty-slot targeting is clearer.
+        if !first.isCompletelyEmpty && !second.isCompletelyEmpty {
+            let zones: [(edge: SplitEdge, rect: CGRect, anchor: CGPoint)]
+            switch axis {
+            case .vertical:
+                let halfSpan = min(tJunctionHalfSpan, min(firstRect.width, secondRect.width) * 0.45)
+                let depthPx = min(tJunctionMaxDepth, bounds.height * 0.14)
+                let topRect = CGRect(x: seamPos - halfSpan, y: bounds.minY, width: halfSpan * 2, height: depthPx)
+                let bottomRect = CGRect(x: seamPos - halfSpan, y: bounds.maxY - depthPx, width: halfSpan * 2, height: depthPx)
+                zones = [
+                    (.top, topRect, CGPoint(x: seamPos, y: bounds.minY)),
+                    (.bottom, bottomRect, CGPoint(x: seamPos, y: bounds.maxY)),
+                ]
+            case .horizontal:
+                let halfSpan = min(tJunctionHalfSpan, min(firstRect.height, secondRect.height) * 0.45)
+                let depthPx = min(tJunctionMaxDepth, bounds.width * 0.14)
+                let leftRect = CGRect(x: bounds.minX, y: seamPos - halfSpan, width: depthPx, height: halfSpan * 2)
+                let rightRect = CGRect(x: bounds.maxX - depthPx, y: seamPos - halfSpan, width: depthPx, height: halfSpan * 2)
+                zones = [
+                    (.left, leftRect, CGPoint(x: bounds.minX, y: seamPos)),
+                    (.right, rightRect, CGPoint(x: bounds.maxX, y: seamPos)),
+                ]
+            }
+
+            for zone in zones where zone.rect.contains(pointer) {
+                let dist = hypot(pointer.x - zone.anchor.x, pointer.y - zone.anchor.y)
+                let candidate = TJunctionCandidate(
+                    nodeID: id,
+                    edge: zone.edge,
+                    containerBounds: bounds,
+                    distance: dist,
+                    depth: depth
+                )
+                if let current = best {
+                    if dist < current.distance - 1 || (abs(dist - current.distance) <= 1 && depth > current.depth) {
+                        best = candidate
+                    }
+                } else {
+                    best = candidate
+                }
+            }
+        }
+
+        collectTJunctions(node: first, bounds: firstRect, depth: depth + 1, pointer: pointer, best: &best)
+        collectTJunctions(node: second, bounds: secondRect, depth: depth + 1, pointer: pointer, best: &best)
     }
 }

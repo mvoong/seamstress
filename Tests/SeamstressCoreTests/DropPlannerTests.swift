@@ -97,4 +97,73 @@ final class DropPlannerTests: XCTestCase {
         )
         XCTAssertEqual(centerPlan?.action, .keepInPlace(leafID: leafID))
     }
+
+    func testTJunctionOnVerticalSplitSplitsEntireContainerHorizontally() {
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 10)
+        tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .right, with: 20)
+        let rootSplitID = tree.root.id
+
+        // Dragging near top-center "T" (500, 15) spans full width across both panes
+        let topT = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 15),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(topT?.action, .splitNode(nodeID: rootSplitID, edge: .top))
+        XCTAssertEqual(topT?.previewRect, CGRect(x: 0, y: 0, width: 1000, height: 400))
+
+        // Dragging near bottom-center "T" (500, 785) spans full width on bottom half
+        let bottomT = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 785),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(bottomT?.action, .splitNode(nodeID: rootSplitID, edge: .bottom))
+        XCTAssertEqual(bottomT?.previewRect, CGRect(x: 0, y: 400, width: 1000, height: 400))
+
+        // Dragging near top-left (150, 15) away from the T still splits only window 10
+        let leftOnly = DropPlanner.plan(
+            pointer: CGPoint(x: 150, y: 15),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(leftOnly?.action, .splitOccupied(leafID: tree.leafID(for: 10)!, edge: .top))
+        XCTAssertEqual(leftOnly?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 400))
+    }
+
+    func testTJunctionOnHorizontalSplitSplitsEntireContainerVertically() {
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 10)
+        tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .bottom, with: 20)
+        let rootSplitID = tree.root.id
+
+        // Dragging near left-middle "T" (20, 400) spans full height on left half
+        let leftT = DropPlanner.plan(
+            pointer: CGPoint(x: 20, y: 400),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(leftT?.action, .splitNode(nodeID: rootSplitID, edge: .left))
+        XCTAssertEqual(leftT?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
+
+        // Dragging near right-middle "T" (980, 400) spans full height on right half
+        let rightT = DropPlanner.plan(
+            pointer: CGPoint(x: 980, y: 400),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(rightT?.action, .splitNode(nodeID: rootSplitID, edge: .right))
+        XCTAssertEqual(rightT?.previewRect, CGRect(x: 500, y: 0, width: 500, height: 800))
+    }
 }
