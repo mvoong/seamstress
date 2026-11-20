@@ -199,6 +199,11 @@ final class WindowManager: ObservableObject {
             return !self.axBridge.isSeamPointOccluded(point, allowedWindowIDs: hit.participatingWindowIDs)
         }
 
+        inputTap.topWindowAtPointSync = { [weak self] point in
+            guard let self, let win = self.axBridge.topWindow(at: point) else { return nil }
+            return (win.windowID, win.ownerPID)
+        }
+
         inputTap.onSeamDragBegin = { [weak self] hit, point in
             self?.handleSeamDragBegin(hit, at: point)
         }
@@ -952,16 +957,18 @@ final class WindowManager: ObservableObject {
         let seams = store.visibleSeams(for: active)
         inputTap.updateVisibleSeams(seams)
 
-        // Sync AXObserver PIDs to ONLY apps that currently have tiled windows
+        // Sync AXObserver PIDs and EventTap tiled state to apps that currently have tiled windows
+        let tiledIDs = store.allTiledWindowIDs
         var pids: Set<pid_t> = []
-        for wid in store.allTiledWindowIDs {
+        for wid in tiledIDs {
             if let pid = axBridge.pid(for: wid) {
                 pids.insert(pid)
             }
         }
+        inputTap.updateTiledState(windowIDs: tiledIDs, pids: pids)
         eventMonitor.syncObservedPIDs(pids)
 
-        tiledWindowCount = store.allTiledWindowIDs.count
+        tiledWindowCount = tiledIDs.count
         if let display = currentMenuDisplay() {
             activeDisplayBounds = display.usableFrameCG
             activeLayoutLeaves = store.tree(for: display.spaceKey).leafPlacements(in: display.usableFrameCG)

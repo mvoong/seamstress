@@ -28,6 +28,9 @@ final class InputEventTap {
     /// Synchronous fast Z-order check used on `leftMouseDown` if the user clicks a seam
     /// before the async hover check has landed on main.
     var isSeamHitUnoccludedSync: ((_ hit: SeamHit, _ point: CGPoint) -> Bool)?
+    /// Synchronous WindowServer hit-test used on Option+`leftMouseDown` to avoid macOS hiding
+    /// the previously focused app when clicking an unfocused tiled window (or clicking away from one).
+    var topWindowAtPointSync: ((_ point: CGPoint) -> (windowID: WindowID, ownerPID: pid_t)?)?
     var onSeamDragBegin: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
     var onSeamDragMove: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
     var onSeamDragEnd: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
@@ -40,6 +43,8 @@ final class InputEventTap {
 
     private let lock = NSLock()
     private var visibleSeams: [VisibleSeam] = []
+    private var tiledWindowIDs: Set<WindowID> = []
+    private var tiledPIDs: Set<pid_t> = []
     private var unoccludedHit: SeamHit?
     private var lastHoverIdentity: String?
     private var lastHoverNotifyPoint: CGPoint = .zero
@@ -73,6 +78,14 @@ final class InputEventTap {
                 lastHoverIdentity = nil
             }
         }
+        lock.unlock()
+    }
+
+    /// Called from main thread whenever the set of tiled windows or owning PIDs changes.
+    func updateTiledState(windowIDs: Set<WindowID>, pids: Set<pid_t>) {
+        lock.lock()
+        tiledWindowIDs = windowIDs
+        tiledPIDs = pids
         lock.unlock()
     }
 
@@ -153,6 +166,8 @@ final class InputEventTap {
         isLeftMouseDown = false
         unoccludedHit = nil
         lastHoverIdentity = nil
+        tiledWindowIDs = []
+        tiledPIDs = []
         lock.unlock()
 
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
@@ -263,9 +278,32 @@ final class InputEventTap {
             }
             isLeftMouseDown = true
             lastSnapModifierDown = snapModifierDown
+            let currentTiledWindowIDs = tiledWindowIDs
+            let currentTiledPIDs = tiledPIDs
             lock.unlock()
 
-            let isGestureDrag = Self.isGestureDragModifierActive(event.flags)
+            let originalFlags = event.flags
+            let isGestureDrag = Self.isGestureDragModifierActive(originalFlags)
+
+            // Prevent macOS's native "Option-click another app to hide the previous app"
+            // shortcut from hiding a focused window and evicting it from the layout.
+            if originalFlags.contains(.maskAlternate),
+               !originalFlags.contains(.maskCommand),
+               !originalFlags.contains(.maskControl),
+               (!currentTiledWindowIDs.isEmpty || !currentTiledPIDs.isEmpty),
+               let top = topWindowAtPointSync?(point),
+               let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+               OptionClickPolicy.shouldStripOptionOnMouseDown(
+                   flags: originalFlags,
+                   clickedWindowID: top.windowID,
+                   clickedOwnerPID: top.ownerPID,
+                   frontmostPID: frontmostPID,
+                   tiledWindowIDs: currentTiledWindowIDs,
+                   tiledPIDs: currentTiledPIDs
+               ) {
+                event.flags = OptionClickPolicy.strippingOption(from: originalFlags)
+            }
+
             DispatchQueue.main.async { [weak self] in
                 self?.onWindowMouseDown?(point, snapModifierDown, isGestureDrag)
             }
