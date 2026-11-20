@@ -4,15 +4,21 @@ import CoreGraphics
 import Foundation
 import SeamstressCore
 
-/// Dedicated high-QoS `CGEventTap` for mouse and Option-key observation.
+/// Dedicated high-QoS `CGEventTap` for mouse and snap-modifier (`⌥` or `⌃⌘`) observation.
 ///
 /// Performance design:
 /// - Runs on a dedicated `.userInteractive` thread so a busy main thread never stalls cursor input.
 /// - `mouseMoved` does a pure O(N) in-memory rect check on the tap thread against visible seams
 ///   (typically 0–10 rects). Moving the mouse anywhere outside a seam triggers zero main-thread hops.
 /// - Only swallows mouse events when clicking/dragging an unoccluded Seamstress seam or `┼`
-///   intersection; normal window drags (titlebar drag and `⌥⌘` drag-anywhere) pass straight through.
+///   intersection; normal window drags (titlebar drag and `⌃⌘` drag-anywhere) pass straight through.
 final class InputEventTap {
+    /// Returns true when the snap/split modifier is active: either `⌥` (Option) or `⌃⌘`
+    /// (Control+Command, used by macOS's `NSWindowShouldDragOnGesture` drag-anywhere gesture).
+    static func isSnapModifierActive(_ flags: CGEventFlags) -> Bool {
+        flags.contains(.maskAlternate) || flags.contains([.maskControl, .maskCommand])
+    }
+
     var onHoverCandidateChanged: ((_ hit: SeamHit?, _ point: CGPoint) -> Void)?
     /// Synchronous fast Z-order check used on `leftMouseDown` if the user clicks a seam
     /// before the async hover check has landed on main.
@@ -22,10 +28,10 @@ final class InputEventTap {
     var onSeamDragEnd: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
     var onSeamDoubleClick: ((_ hit: SeamHit) -> Void)?
 
-    var onWindowMouseDown: ((_ point: CGPoint, _ optionDown: Bool) -> Void)?
-    var onWindowMouseDragged: ((_ point: CGPoint, _ optionDown: Bool) -> Void)?
-    var onWindowMouseUp: ((_ point: CGPoint, _ optionDown: Bool) -> Void)?
-    var onOptionFlagChangedDuringDrag: ((_ optionDown: Bool, _ point: CGPoint) -> Void)?
+    var onWindowMouseDown: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
+    var onWindowMouseDragged: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
+    var onWindowMouseUp: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
+    var onSnapModifierChangedDuringDrag: ((_ snapModifierDown: Bool, _ point: CGPoint) -> Void)?
 
     private let lock = NSLock()
     private var visibleSeams: [VisibleSeam] = []
@@ -36,7 +42,7 @@ final class InputEventTap {
     private var activeSeamDrag: SeamHit?
     private var swallowingDoubleClickUp = false
     private var isLeftMouseDown = false
-    private var lastOptionDown = false
+    private var lastSnapModifierDown = false
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -178,7 +184,7 @@ final class InputEventTap {
     /// Runs on the dedicated EventTap thread. Must return in microseconds.
     fileprivate func handle(type: CGEventType, event: CGEvent) -> CGEvent? {
         let point = event.location
-        let optionDown = event.flags.contains(.maskAlternate)
+        let snapModifierDown = Self.isSnapModifierActive(event.flags)
 
         switch type {
         case .mouseMoved:
@@ -251,11 +257,11 @@ final class InputEventTap {
                 }
             }
             isLeftMouseDown = true
-            lastOptionDown = optionDown
+            lastSnapModifierDown = snapModifierDown
             lock.unlock()
 
             DispatchQueue.main.async { [weak self] in
-                self?.onWindowMouseDown?(point, optionDown)
+                self?.onWindowMouseDown?(point, snapModifierDown)
             }
             return event
 
@@ -272,11 +278,11 @@ final class InputEventTap {
                 }
                 return nil
             }
-            lastOptionDown = optionDown
+            lastSnapModifierDown = snapModifierDown
             lock.unlock()
 
             DispatchQueue.main.async { [weak self] in
-                self?.onWindowMouseDragged?(point, optionDown)
+                self?.onWindowMouseDragged?(point, snapModifierDown)
             }
             return event
 
@@ -299,21 +305,21 @@ final class InputEventTap {
             lock.unlock()
 
             DispatchQueue.main.async { [weak self] in
-                self?.onWindowMouseUp?(point, optionDown)
+                self?.onWindowMouseUp?(point, snapModifierDown)
             }
             return event
 
         case .flagsChanged:
             lock.lock()
-            let shouldNotify = isLeftMouseDown && activeSeamDrag == nil && optionDown != lastOptionDown
+            let shouldNotify = isLeftMouseDown && activeSeamDrag == nil && snapModifierDown != lastSnapModifierDown
             if shouldNotify {
-                lastOptionDown = optionDown
+                lastSnapModifierDown = snapModifierDown
             }
             lock.unlock()
 
             if shouldNotify {
                 DispatchQueue.main.async { [weak self] in
-                    self?.onOptionFlagChangedDuringDrag?(optionDown, point)
+                    self?.onSnapModifierChangedDuringDrag?(snapModifierDown, point)
                 }
             }
             return event

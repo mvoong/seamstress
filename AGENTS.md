@@ -7,7 +7,7 @@ Lightweight, mouse-driven macOS tiling window manager (`com.example.seamstress`,
 - `Sources/SeamstressCore/`: Pure Swift core with zero AppKit/AX dependencies:
   - `Geometry.swift`: CG↔NS coordinate conversion, flush integer-aligned rect splitting, cursor-anchored detach restore.
   - `LayoutTree.swift`: BSP tree with `.empty`, `.window`, and `.split` nodes (`removeWindow` leaves an empty slot; `removeWindowAndCollapse` promotes the sibling to fill vacated space).
-  - `DropPlanner.swift`: Option-drag zone classification (split T-junctions `┬`/`┴`/`├`/`┤` split the parent container along the perpendicular axis; empty center=fill / edge=half; occupied center=swap / outer=split; own edge=shrink).
+  - `DropPlanner.swift`: Snap-drag (`⌥`-drag / `⌃⌘`-drag) zone classification (split T-junctions `┬`/`┴`/`├`/`┤` split the parent container along the perpendicular axis; empty center=fill / edge=half; occupied center=swap / outer=split; own edge=shrink).
   - `SeamGeometry.swift`: Flush `10pt` (`±5pt`) seam hit strips, hit-testing, ratio clamping, and `> 90%` collapse-to-empty detection.
   - `SpaceLayoutStore.swift`: Per-`(displayUUID, spaceID)` tree store, saved pre-tiled floating frames, cross-monitor moves/swaps.
   - `LayoutReconstructor.swift`: Pure startup/first-Space-visit BSP reconstructor from on-screen window frames (14pt edge tolerance, floating-window guardrails).

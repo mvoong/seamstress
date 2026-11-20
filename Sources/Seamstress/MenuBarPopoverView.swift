@@ -171,7 +171,7 @@ struct MenuBarPopoverView: View {
 
     private var cheatSheet: some View {
         VStack(alignment: .leading, spacing: 4) {
-            row("⌥ + Drag", "Fill empty space, split edge, or swap center")
+            row("⌥ / ⌃⌘ Drag", "Fill empty space, split edge, or swap center")
             row("Normal Drag", "Detach to floating & expand neighbors")
             row("Hover Seam", "Drag to resize · Double-click to collapse/50%")
         }
@@ -187,7 +187,7 @@ struct MenuBarPopoverView: View {
             Text(key)
                 .font(.caption.monospaced().weight(.semibold))
                 .foregroundStyle(.primary)
-                .frame(width: 82, alignment: .leading)
+                .frame(width: 88, alignment: .leading)
             Text(desc)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

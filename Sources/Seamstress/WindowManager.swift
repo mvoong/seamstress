@@ -190,20 +190,20 @@ final class WindowManager: ObservableObject {
             self?.handleSeamDoubleClick(hit)
         }
 
-        inputTap.onWindowMouseDown = { [weak self] point, optionDown in
-            self?.handleWindowMouseDown(at: point, optionDown: optionDown)
+        inputTap.onWindowMouseDown = { [weak self] point, snapModifierDown in
+            self?.handleWindowMouseDown(at: point, snapModifierDown: snapModifierDown)
         }
 
-        inputTap.onWindowMouseDragged = { [weak self] point, optionDown in
-            self?.handleWindowMouseDragged(to: point, optionDown: optionDown)
+        inputTap.onWindowMouseDragged = { [weak self] point, snapModifierDown in
+            self?.handleWindowMouseDragged(to: point, snapModifierDown: snapModifierDown)
         }
 
-        inputTap.onWindowMouseUp = { [weak self] point, optionDown in
-            self?.handleWindowMouseUp(at: point, optionDown: optionDown)
+        inputTap.onWindowMouseUp = { [weak self] point, snapModifierDown in
+            self?.handleWindowMouseUp(at: point, snapModifierDown: snapModifierDown)
         }
 
-        inputTap.onOptionFlagChangedDuringDrag = { [weak self] optionDown, point in
-            self?.handleOptionChangedDuringDrag(optionDown: optionDown, point: point)
+        inputTap.onSnapModifierChangedDuringDrag = { [weak self] snapModifierDown, point in
+            self?.handleSnapModifierChangedDuringDrag(snapModifierDown: snapModifierDown, point: point)
         }
     }
 
@@ -486,9 +486,9 @@ final class WindowManager: ObservableObject {
         }
     }
 
-    // MARK: - Window drag (normal detach, manual resize detach & Option-drag tiling)
+    // MARK: - Window drag (normal detach, manual resize detach & Option / Ctrl+Cmd drag tiling)
 
-    private func handleWindowMouseDown(at point: CGPoint, optionDown: Bool) {
+    private func handleWindowMouseDown(at point: CGPoint, snapModifierDown: Bool) {
         guard isRunning else { return }
         seamOverlay.hide()
         dropOverlay.hide()
@@ -507,7 +507,7 @@ final class WindowManager: ObservableObject {
         )
     }
 
-    private func handleWindowMouseDragged(to point: CGPoint, optionDown: Bool) {
+    private func handleWindowMouseDragged(to point: CGPoint, snapModifierDown: Bool) {
         guard var session = windowDrag else { return }
         guard session.phase != .ignored else { return }
 
@@ -554,9 +554,9 @@ final class WindowManager: ObservableObject {
             axBridge.register(windowID: session.window.windowID, pid: session.window.ownerPID)
             session.phase = .moving
 
-            // Dragging a tiled window WITHOUT Option detaches it immediately and expands neighbors,
-            // while keeping a short undo snapshot in case Option is pressed right after starting.
-            if !optionDown && store.isTiled(session.window.windowID) {
+            // Dragging a tiled window WITHOUT a snap modifier detaches it immediately and expands neighbors,
+            // while keeping a short undo snapshot in case Option or Ctrl+Cmd is pressed right after starting.
+            if !snapModifierDown && store.isTiled(session.window.windowID) {
                 session.detachUndo = detachTiledWindowDuringDrag(
                     windowID: session.window.windowID,
                     currentFrame: liveBounds,
@@ -566,7 +566,7 @@ final class WindowManager: ObservableObject {
             }
         }
 
-        if optionDown {
+        if snapModifierDown {
             let plan = computeDropPlan(at: point, draggedWindowID: session.window.windowID)
             session.currentPlan = plan
             windowDrag = session
@@ -586,12 +586,12 @@ final class WindowManager: ObservableObject {
         }
     }
 
-    private func handleOptionChangedDuringDrag(optionDown: Bool, point: CGPoint) {
+    private func handleSnapModifierChangedDuringDrag(snapModifierDown: Bool, point: CGPoint) {
         guard var session = windowDrag, session.phase == .moving else { return }
 
-        if optionDown {
-            // Late-Option grace window: if the user started dragging a tiled window and pressed
-            // Option within 0.45s, restore its pre-detach layout so center-swap & T-splits work seamlessly.
+        if snapModifierDown {
+            // Late-modifier grace window: if the user started dragging a tiled window and pressed
+            // Option (or Ctrl+Cmd) within 0.45s, restore its pre-detach layout so center-swap & T-splits work seamlessly.
             if let undo = session.detachUndo,
                let detachedAt = session.detachedAt,
                ProcessInfo.processInfo.systemUptime - detachedAt <= Self.lateOptionGraceWindow {
@@ -618,7 +618,7 @@ final class WindowManager: ObservableObject {
             windowDrag = session
             dropOverlay.hide()
 
-            // If user started dragging a tiled window with Option held and then released Option
+            // If user started dragging a tiled window with a snap modifier held and then released it
             // mid-drag, detach it to floating right away.
             if store.isTiled(session.window.windowID) {
                 let current = axBridge.windowBounds(windowID: session.window.windowID) ?? session.preDragFrame
@@ -633,12 +633,12 @@ final class WindowManager: ObservableObject {
         }
     }
 
-    private func handleWindowMouseUp(at point: CGPoint, optionDown: Bool) {
+    private func handleWindowMouseUp(at point: CGPoint, snapModifierDown: Bool) {
         dropOverlay.hide()
         guard let session = windowDrag else { return }
         windowDrag = nil
 
-        guard session.phase == .moving, optionDown else { return }
+        guard session.phase == .moving, snapModifierDown else { return }
 
         let plan = computeDropPlan(at: point, draggedWindowID: session.window.windowID) ?? session.currentPlan
         guard let plan else { return }
