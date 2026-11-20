@@ -8,6 +8,7 @@ import SeamstressCore
 final class WindowEventMonitor {
     var onWindowBecameUnavailable: ((WindowID) -> Void)?
     var onApplicationUnavailable: ((pid_t) -> Void)?
+    var onApplicationTerminated: ((pid_t) -> Void)?
     var onSanitySweep: (() -> Void)?
 
     private var pidObservers: [pid_t: AXObserver] = [:]
@@ -36,6 +37,7 @@ final class WindowEventMonitor {
             if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
                 self?.removeObserver(for: app.processIdentifier)
                 self?.onApplicationUnavailable?(app.processIdentifier)
+                self?.onApplicationTerminated?(app.processIdentifier)
             }
         })
 

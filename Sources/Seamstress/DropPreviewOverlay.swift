@@ -18,6 +18,7 @@ final class DropPreviewOverlay {
 
     func show(cgRect: CGRect, kind: DropPreviewKind, primaryScreenHeight: CGFloat) {
         if isVisible && lastRect == cgRect && lastKind == kind { return }
+        let wasVisible = isVisible
         lastRect = cgRect
         lastKind = kind
 
@@ -27,7 +28,6 @@ final class DropPreviewOverlay {
         // Slight visual inset so the border sits crisply inside the target tile bounds.
         let insetRect = cgRect.insetBy(dx: 4, dy: 4)
         let nsFrame = CoordinateSpace.nsRect(fromCG: insetRect, primaryHeight: primaryScreenHeight)
-        panel.setFrame(nsFrame, display: false)
 
         let accent: NSColor
         switch kind {
@@ -47,7 +47,14 @@ final class DropPreviewOverlay {
             CATransaction.commit()
         }
 
-        if !panel.isVisible {
+        if wasVisible {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.07
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(nsFrame, display: true)
+            }
+        } else {
+            panel.setFrame(nsFrame, display: false)
             panel.orderFrontRegardless()
         }
     }

@@ -15,11 +15,24 @@ final class SkyLightBridge {
     private typealias CopyManagedDisplaySpacesFn = @convention(c) (Int32) -> CFArray?
     private typealias CopySpacesForWindowsFn = @convention(c) (Int32, Int32, CFArray) -> CFArray?
     private typealias SetConnectionPropertyFn = @convention(c) (Int32, Int32, CFString, CFTypeRef) -> CGError
+    private typealias QueryWindowsFn = @convention(c) (Int32, UnsafeRawPointer, Int32) -> UnsafeRawPointer?
+    private typealias CopyWindowsFn = @convention(c) (UnsafeRawPointer) -> UnsafeRawPointer?
+    private typealias AdvanceIteratorFn = @convention(c) (UnsafeRawPointer) -> Bool
+    private typealias GetConstraintsFn = @convention(c) (
+        UnsafeRawPointer,
+        UnsafeMutablePointer<CGSize>,
+        UnsafeMutablePointer<CGSize>,
+        UnsafeMutablePointer<CGSize>
+    ) -> Void
 
     private let mainConnectionID: MainConnectionIDFn?
     private let copyManagedDisplaySpaces: CopyManagedDisplaySpacesFn?
     private let copySpacesForWindows: CopySpacesForWindowsFn?
     private let setConnectionProperty: SetConnectionPropertyFn?
+    private let queryWindows: QueryWindowsFn?
+    private let copyWindows: CopyWindowsFn?
+    private let advanceIterator: AdvanceIteratorFn?
+    private let getConstraints: GetConstraintsFn?
 
     private init() {
         let handle = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY)
@@ -38,6 +51,10 @@ final class SkyLightBridge {
             ?? sym("SLSCopySpacesForWindows", as: CopySpacesForWindowsFn.self)
         self.setConnectionProperty = sym("CGSSetConnectionProperty", as: SetConnectionPropertyFn.self)
             ?? sym("SLSSetConnectionProperty", as: SetConnectionPropertyFn.self)
+        self.queryWindows = sym("SLSWindowQueryWindows", as: QueryWindowsFn.self)
+        self.copyWindows = sym("SLSWindowQueryResultCopyWindows", as: CopyWindowsFn.self)
+        self.advanceIterator = sym("SLSWindowIteratorAdvance", as: AdvanceIteratorFn.self)
+        self.getConstraints = sym("SLSWindowIteratorGetConstraints", as: GetConstraintsFn.self)
     }
 
     /// Allow our background menu bar app to change the mouse cursor when hovering a flush seam.
@@ -83,5 +100,35 @@ final class SkyLightBridge {
         // kCGSAllSpacesMask = 7
         guard let spaces = copyWinSpaces(cidFn(), 7, arr) as? [NSNumber] else { return [] }
         return spaces.map { $0.uint64Value }
+    }
+
+    /// Reads the minimum frame size an app declared to WindowServer for `windowID`,
+    /// or `nil` when undeclared or unavailable. Fast, non-blocking, zero AX IPC.
+    func declaredMinimumSize(for windowID: WindowID) -> CGSize? {
+        guard let cidFn = mainConnectionID,
+              let queryFn = queryWindows,
+              let copyFn = copyWindows,
+              let advanceFn = advanceIterator,
+              let constraintsFn = getConstraints else {
+            return nil
+        }
+        let ids = [NSNumber(value: windowID)] as CFArray
+        guard let query = queryFn(cidFn(), Unmanaged.passUnretained(ids).toOpaque(), 1) else {
+            return nil
+        }
+        defer { Unmanaged<CFTypeRef>.fromOpaque(query).release() }
+        guard let iterator = copyFn(query) else { return nil }
+        defer { Unmanaged<CFTypeRef>.fromOpaque(iterator).release() }
+        guard advanceFn(iterator) else { return nil }
+
+        var minSize = CGSize.zero
+        var maxSize = CGSize.zero
+        var prefSize = CGSize.zero
+        constraintsFn(iterator, &minSize, &maxSize, &prefSize)
+
+        let w = (minSize.width.isFinite && minSize.width > 20 && minSize.width < 4000) ? minSize.width : 0
+        let h = (minSize.height.isFinite && minSize.height > 20 && minSize.height < 4000) ? minSize.height : 0
+        guard w > 0 || h > 0 else { return nil }
+        return CGSize(width: w, height: h)
     }
 }

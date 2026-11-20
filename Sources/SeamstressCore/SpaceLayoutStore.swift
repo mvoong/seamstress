@@ -21,6 +21,15 @@ public struct LayoutCommitResult: Equatable, Sendable {
     }
 }
 
+/// Snapshot of a space's tree before a drag-detach, allowing a brief grace-window restore
+/// if the user presses Option right after starting to drag a tiled window.
+public struct DetachUndoSnapshot: Equatable, Sendable {
+    public let spaceKey: SpaceKey
+    public let previousTree: LayoutTree
+    public let windowID: WindowID
+    public let savedFloatingFrame: CGRect?
+}
+
 /// Pure state store owning all per-(displayUUID, spaceID) BSP trees, saved pre-tiled
 /// floating frames, and learned per-window minimum sizes.
 public final class SpaceLayoutStore {
@@ -214,19 +223,23 @@ public final class SpaceLayoutStore {
 
     /// Detach a tiled window when dragged normally (without Option).
     /// Collapses its split so neighboring windows expand to fill the vacated space,
-    /// and returns the restored floating frame anchored under `cursor`.
+    /// and returns the restored floating frame anchored under `cursor` plus an undo snapshot
+    /// in case the user presses Option shortly after starting the drag.
     public func detachByUserDrag(
         windowID: WindowID,
         currentFrame: CGRect,
         cursor: CGPoint
-    ) -> (restoredFrame: CGRect?, spaceKey: SpaceKey)? {
+    ) -> (restoredFrame: CGRect?, spaceKey: SpaceKey, undo: DetachUndoSnapshot)? {
         guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
-        var t = tree(for: space)
+        let previousTree = tree(for: space)
+        let savedFrame = savedFloatingFrames.removeValue(forKey: windowID)
+
+        var t = previousTree
         t.removeWindowAndCollapse(windowID)
         store(t, for: space)
 
         let restored: CGRect?
-        if let saved = savedFloatingFrames.removeValue(forKey: windowID) {
+        if let saved = savedFrame {
             restored = CGRect.restoredUnderCursor(
                 savedSize: saved.size,
                 currentFrame: currentFrame,
@@ -235,7 +248,40 @@ public final class SpaceLayoutStore {
         } else {
             restored = nil
         }
-        return (restored, space)
+        let undo = DetachUndoSnapshot(
+            spaceKey: space,
+            previousTree: previousTree,
+            windowID: windowID,
+            savedFloatingFrame: savedFrame
+        )
+        return (restored, space, undo)
+    }
+
+    /// Restore a space's tree from a recent `DetachUndoSnapshot` when the user presses Option
+    /// right after starting to drag a tiled window.
+    @discardableResult
+    public func restoreDetachSnapshot(_ snapshot: DetachUndoSnapshot) -> Bool {
+        guard windowToSpace[snapshot.windowID] == nil else { return false }
+        trees[snapshot.spaceKey] = snapshot.previousTree
+        for wid in snapshot.previousTree.allWindowIDs {
+            windowToSpace[wid] = snapshot.spaceKey
+        }
+        if let saved = snapshot.savedFloatingFrame {
+            savedFloatingFrames[snapshot.windowID] = saved
+        }
+        return true
+    }
+
+    /// Detach a tiled window when the user manually resizes it via its own macOS edge/corner.
+    /// Expands neighboring tiled windows to fill the vacated slot without touching the resized window's frame.
+    @discardableResult
+    public func detachByManualResize(windowID: WindowID) -> SpaceKey? {
+        guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
+        savedFloatingFrames.removeValue(forKey: windowID)
+        var t = tree(for: space)
+        t.removeWindowAndCollapse(windowID)
+        store(t, for: space)
+        return space
     }
 
     /// Handle a tiled window closing, minimizing, hiding, or entering fullscreen.

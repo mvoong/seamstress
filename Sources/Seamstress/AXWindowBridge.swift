@@ -140,6 +140,20 @@ final class AXWindowBridge {
         lock.unlock()
     }
 
+    /// Evict all cached AX elements, frame history, queues, and coalescers for a terminated app.
+    func evictTerminatedPID(_ pid: pid_t) {
+        lock.lock()
+        let deadIDs = elementCache.compactMap { $0.value.pid == pid ? $0.key : nil }
+        for wid in deadIDs {
+            elementCache.removeValue(forKey: wid)
+            lastAppliedFrames.removeValue(forKey: wid)
+        }
+        pidQueues.removeValue(forKey: pid)
+        pidCoalescers.removeValue(forKey: pid)
+        batchEnhancedRestore.removeValue(forKey: pid)
+        lock.unlock()
+    }
+
     /// Resolve and cache the `AXUIElement` for `(windowID, pid)`.
     func resolveElement(windowID: WindowID, pid: pid_t) -> AXUIElement? {
         lock.lock()

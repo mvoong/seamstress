@@ -48,4 +48,30 @@ final class SeamGeometryTests: XCTestCase {
         let collapse = SeamGeometry.dragUpdate(pointer: CGPoint(x: 920, y: 400), seam: seams[0], tree: tree, minSizes: [:])
         XCTAssertEqual(collapse.collapseTarget, .collapseSecond(expandedBounds: screen))
     }
+
+    func testHitTestTargetDetectsIntersectionInFourPaneGrid() {
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 1)
+        tree.splitOccupied(leafID: tree.leafID(for: 1)!, edge: .right, with: 2)
+        tree.splitOccupied(leafID: tree.leafID(for: 1)!, edge: .bottom, with: 3)
+        tree.splitOccupied(leafID: tree.leafID(for: 2)!, edge: .bottom, with: 4)
+
+        let seams = SeamGeometry.seams(in: tree, spaceKey: space, bounds: screen)
+        // Center intersection (500, 400) hits both the vertical seam and a horizontal seam
+        let hit = SeamGeometry.hitTestTarget(point: CGPoint(x: 500, y: 400), seams: seams)
+        if case .intersection(let v, let h) = hit {
+            XCTAssertEqual(v.axis, .vertical)
+            XCTAssertEqual(h.axis, .horizontal)
+        } else {
+            XCTFail("Expected 2-axis intersection hit at (500, 400), got \(String(describing: hit))")
+        }
+
+        // Away from intersection hits only a single vertical seam
+        let verticalOnly = SeamGeometry.hitTestTarget(point: CGPoint(x: 500, y: 150), seams: seams)
+        if case .single(let s) = verticalOnly {
+            XCTAssertEqual(s.axis, .vertical)
+        } else {
+            XCTFail("Expected single vertical seam at (500, 150), got \(String(describing: verticalOnly))")
+        }
+    }
 }

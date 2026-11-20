@@ -10,17 +10,17 @@ import SeamstressCore
 /// - Runs on a dedicated `.userInteractive` thread so a busy main thread never stalls cursor input.
 /// - `mouseMoved` does a pure O(N) in-memory rect check on the tap thread against visible seams
 ///   (typically 0–10 rects). Moving the mouse anywhere outside a seam triggers zero main-thread hops.
-/// - Only swallows mouse events when clicking/dragging an unoccluded Seamstress seam; normal
-///   window drags (titlebar drag and `⌥⌘` drag-anywhere) pass straight through to macOS untouched.
+/// - Only swallows mouse events when clicking/dragging an unoccluded Seamstress seam or `┼`
+///   intersection; normal window drags (titlebar drag and `⌥⌘` drag-anywhere) pass straight through.
 final class InputEventTap {
-    var onHoverCandidateChanged: ((_ seam: VisibleSeam?, _ point: CGPoint) -> Void)?
+    var onHoverCandidateChanged: ((_ hit: SeamHit?, _ point: CGPoint) -> Void)?
     /// Synchronous fast Z-order check used on `leftMouseDown` if the user clicks a seam
     /// before the async hover check has landed on main.
-    var isSeamUnoccludedSync: ((_ seam: VisibleSeam, _ point: CGPoint) -> Bool)?
-    var onSeamDragBegin: ((_ seam: VisibleSeam, _ point: CGPoint) -> Void)?
-    var onSeamDragMove: ((_ seam: VisibleSeam, _ point: CGPoint) -> Void)?
-    var onSeamDragEnd: ((_ seam: VisibleSeam, _ point: CGPoint) -> Void)?
-    var onSeamDoubleClick: ((_ seam: VisibleSeam) -> Void)?
+    var isSeamHitUnoccludedSync: ((_ hit: SeamHit, _ point: CGPoint) -> Bool)?
+    var onSeamDragBegin: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
+    var onSeamDragMove: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
+    var onSeamDragEnd: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
+    var onSeamDoubleClick: ((_ hit: SeamHit) -> Void)?
 
     var onWindowMouseDown: ((_ point: CGPoint, _ optionDown: Bool) -> Void)?
     var onWindowMouseDragged: ((_ point: CGPoint, _ optionDown: Bool) -> Void)?
@@ -29,11 +29,11 @@ final class InputEventTap {
 
     private let lock = NSLock()
     private var visibleSeams: [VisibleSeam] = []
-    private var unoccludedSeam: VisibleSeam?
-    private var lastHoverSeamID: NodeID?
+    private var unoccludedHit: SeamHit?
+    private var lastHoverIdentity: String?
     private var lastHoverNotifyPoint: CGPoint = .zero
 
-    private var activeSeamDrag: VisibleSeam?
+    private var activeSeamDrag: SeamHit?
     private var swallowingDoubleClickUp = false
     private var isLeftMouseDown = false
     private var lastOptionDown = false
@@ -53,17 +53,22 @@ final class InputEventTap {
     func updateVisibleSeams(_ seams: [VisibleSeam]) {
         lock.lock()
         visibleSeams = seams
-        if let current = unoccludedSeam, !seams.contains(where: { $0.splitID == current.splitID && $0.spaceKey == current.spaceKey }) {
-            unoccludedSeam = nil
-            lastHoverSeamID = nil
+        if let current = unoccludedHit {
+            let valid = current.allSeams.allSatisfy { target in
+                seams.contains(where: { $0.splitID == target.splitID && $0.spaceKey == target.spaceKey })
+            }
+            if !valid {
+                unoccludedHit = nil
+                lastHoverIdentity = nil
+            }
         }
         lock.unlock()
     }
 
     /// Called from main thread after checking Z-order occlusion for a hovered seam candidate.
-    func setUnoccludedHoverSeam(_ seam: VisibleSeam?) {
+    func setUnoccludedHoverHit(_ hit: SeamHit?) {
         lock.lock()
-        unoccludedSeam = seam
+        unoccludedHit = hit
         lock.unlock()
     }
 
@@ -135,8 +140,8 @@ final class InputEventTap {
         activeSeamDrag = nil
         swallowingDoubleClickUp = false
         isLeftMouseDown = false
-        unoccludedSeam = nil
-        lastHoverSeamID = nil
+        unoccludedHit = nil
+        lastHoverIdentity = nil
         lock.unlock()
 
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
@@ -155,6 +160,7 @@ final class InputEventTap {
             let tap = self.eventTap
             self.lock.unlock()
             if let tap, !CGEvent.tapIsEnabled(tap: tap) {
+                SeamstressLog.lifecycle.notice("Event tap was disabled by macOS — re-enabling")
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
         }
@@ -179,23 +185,23 @@ final class InputEventTap {
             lock.lock()
             let dragging = activeSeamDrag != nil || isLeftMouseDown
             let seams = visibleSeams
-            let prevID = lastHoverSeamID
+            let prevID = lastHoverIdentity
             let prevPoint = lastHoverNotifyPoint
             lock.unlock()
 
             guard !dragging else { return event }
 
-            let hit = SeamGeometry.hitTest(point: point, seams: seams)
-            let hitID = hit?.splitID
+            let hit = SeamGeometry.hitTestTarget(point: point, seams: seams)
+            let hitID = hit?.identityKey
 
             // Notify main thread only when entering/leaving/switching seams, or after moving
             // >= 16pt along the same seam (handles sliding past an occluding floating window).
             let movedAlongSeam = hit != nil && hypot(point.x - prevPoint.x, point.y - prevPoint.y) >= 16
             if hitID != prevID || movedAlongSeam {
                 lock.lock()
-                lastHoverSeamID = hitID
+                lastHoverIdentity = hitID
                 lastHoverNotifyPoint = point
-                if hit == nil { unoccludedSeam = nil }
+                if hit == nil { unoccludedHit = nil }
                 lock.unlock()
 
                 DispatchQueue.main.async { [weak self] in
@@ -208,38 +214,38 @@ final class InputEventTap {
             let clickState = event.getIntegerValueField(.mouseEventClickState)
 
             lock.lock()
-            let candidate = unoccludedSeam
+            let candidate = unoccludedHit
             let seams = visibleSeams
             lock.unlock()
 
             // Fast-click fallback: if the cursor moved onto a seam and clicked before
             // the main-thread hover check finished, verify occlusion synchronously (~0.1ms).
-            var grabbedSeam: VisibleSeam?
-            if let existing = candidate, existing.hitRect.contains(point) {
-                grabbedSeam = existing
-            } else if let directHit = SeamGeometry.hitTest(point: point, seams: seams),
-                      isSeamUnoccludedSync?(directHit, point) == true {
-                grabbedSeam = directHit
+            var grabbed: SeamHit?
+            if let existing = candidate, existing.contains(point) {
+                grabbed = existing
+            } else if let directHit = SeamGeometry.hitTestTarget(point: point, seams: seams),
+                      isSeamHitUnoccludedSync?(directHit, point) == true {
+                grabbed = directHit
             }
 
             lock.lock()
-            if let seam = grabbedSeam {
-                unoccludedSeam = seam
+            if let hit = grabbed {
+                unoccludedHit = hit
                 isLeftMouseDown = true
                 if clickState >= 2 {
                     swallowingDoubleClickUp = true
                     activeSeamDrag = nil
                     lock.unlock()
                     DispatchQueue.main.async { [weak self] in
-                        self?.onSeamDoubleClick?(seam)
+                        self?.onSeamDoubleClick?(hit)
                     }
                     return nil
                 } else {
                     swallowingDoubleClickUp = false
-                    activeSeamDrag = seam
+                    activeSeamDrag = hit
                     lock.unlock()
                     DispatchQueue.main.async { [weak self] in
-                        self?.onSeamDragBegin?(seam, point)
+                        self?.onSeamDragBegin?(hit, point)
                     }
                     return nil
                 }
@@ -259,10 +265,10 @@ final class InputEventTap {
                 lock.unlock()
                 return nil
             }
-            if let seam = activeSeamDrag {
+            if let hit = activeSeamDrag {
                 lock.unlock()
                 DispatchQueue.main.async { [weak self] in
-                    self?.onSeamDragMove?(seam, point)
+                    self?.onSeamDragMove?(hit, point)
                 }
                 return nil
             }
@@ -282,11 +288,11 @@ final class InputEventTap {
                 lock.unlock()
                 return nil
             }
-            if let seam = activeSeamDrag {
+            if let hit = activeSeamDrag {
                 activeSeamDrag = nil
                 lock.unlock()
                 DispatchQueue.main.async { [weak self] in
-                    self?.onSeamDragEnd?(seam, point)
+                    self?.onSeamDragEnd?(hit, point)
                 }
                 return nil
             }

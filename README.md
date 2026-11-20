@@ -20,10 +20,11 @@ A lightweight, mouse-driven macOS tiling window manager built around floating-by
 | **`⌥` + Drag** onto an occupied tiled window (center ~36%) | Swaps two tiled windows, or replaces the tiled window with a floating window (restoring the displaced window to its pre-tiled size). |
 | **`⌥` + Drag** a tiled window onto its own edge | Shrinks it to that half and leaves the opposite half empty. |
 | **Release `⌥` mid-drag** | Cancels tiling preview and lets the window drop as floating. |
-| **Normal Drag** (without `⌥`) on a tiled window | Detaches it back to floating, restores its pre-tiled size anchored under the cursor, and expands neighboring windows to fill the gap. |
+| **Normal Drag** (without `⌥`) on a tiled window | Detaches it back to floating, restores its pre-tiled size anchored under the cursor, and expands neighboring windows to fill the gap. Pressing `⌥` within 0.45s of starting restores the layout so you can still swap/re-split. |
+| **Manual Edge Resize** on a tiled window's own edge | Detaches it cleanly and expands neighboring windows so no stale seam stays behind. |
 | **Close / Minimize / Hide / Quit** a tiled window | Automatically collapses its split so neighboring windows expand to fill the vacated space. |
-| **Hover Seam** (`±5pt` along any flush split line) | Shows a subtle hairline + grip handle and resize cursor (suppressed whenever a floating window sits in front of the seam). |
-| **Drag Seam** | Resizes all affected windows in real time. |
+| **Hover Seam** (`±5pt` along any flush split line or `┼` intersection) | Shows a subtle hairline + grip handle and resize cursor (crosshair at 2-axis intersections; suppressed whenever a floating window sits in front of the seam). |
+| **Drag Seam / `┼` Intersection** | Resizes all affected windows in real time (1-axis along a seam, or simultaneous 2-axis at a vertical+horizontal intersection), clamped to real window minimum sizes. |
 | **Drag Seam > 90%** toward an empty slot | Previews and collapses the empty slot on release, expanding the occupied side to 100%. |
 | **Double-click Seam** | Collapses an adjacent empty slot, or resets a split between two occupied panes to 50/50. |
 

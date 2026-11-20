@@ -57,6 +57,18 @@ final class DisplayObserver {
             _ = self.refresh()
             self.onDisplaysOrSpacesChanged?(false)
         })
+
+        for wakeName in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            observers.append(ws.addObserver(
+                forName: wakeName,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                _ = self.refresh()
+                self.onDisplaysOrSpacesChanged?(true)
+            })
+        }
     }
 
     func stopObserving() {

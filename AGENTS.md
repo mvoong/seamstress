@@ -21,10 +21,11 @@ Lightweight, mouse-driven macOS tiling window manager (`com.example.seamstress`,
 
 - **Coordinate systems:** CoreGraphics uses top-left origin (Y downward); AppKit (`NSScreen` / `NSPanel`) uses bottom-left origin (Y upward). All conversions go through `CoordinateSpace` anchored on `DisplayObserver.primaryScreenHeight`.
 - **AX write ordering:** During live resizing, shrinking windows write `kAXSizeAttribute` before `kAXPositionAttribute` (preventing Dock/screen-edge clamping on horizontal seams); growing windows write `kAXPositionAttribute` before `kAXSizeAttribute`. Cross-monitor commits use `size → position → size`.
-- **No mid-drag min-size latching:** Never latch permanent minimum sizes from immediate AX readbacks during live drags — async/laggy apps report their pre-resize dimensions and freeze seams.
-- **No main-thread AX IPC:** All AX frame writes run on per-PID `.userInteractive` serial queues fronted by `PerPIDFrameCoalescer`.
-- **Z-order occlusion:** Seam hover and click-grab check front-to-back `CGWindowListCopyWindowInfo` so floating windows covering a seam are never intercepted.
-- **SIP-safe Space queries:** `SkyLightBridge` dynamically loads read-only Space functions (`CGSCopyManagedDisplaySpaces`, `CGSCopySpacesForWindows`, `CGSSetConnectionProperty` for `SetsCursorInBackground`) via `dlopen`/`dlsym`.
+- **Minimum window sizes:** Never latch permanent minimum sizes from immediate mid-drag AX readbacks (async/laggy apps report pre-resize sizes and freeze seams). Instead, read declared limits once via SkyLight (`SLSWindowIteratorGetConstraints`) and learn settled minimums 140ms after mouse-up.
+- **No main-thread AX IPC:** All AX frame writes run on per-PID `.userInteractive` serial queues fronted by `PerPIDFrameCoalescer`. Terminated PIDs are evicted on `didTerminateApplicationNotification`.
+- **Z-order occlusion:** Seam hover and click-grab check front-to-back `CGWindowListCopyWindowInfo` so floating windows covering a seam or `┼` intersection are never intercepted.
+- **SIP-safe Space & constraint queries:** `SkyLightBridge` dynamically loads read-only functions (`CGSCopyManagedDisplaySpaces`, `CGSCopySpacesForWindows`, `CGSSetConnectionProperty` for `SetsCursorInBackground`, and `SLSWindowQueryWindows`/`SLSWindowIteratorGetConstraints`) via `dlopen`/`dlsym`.
+- **Diagnostics:** Lightweight `os.Logger` under subsystem `com.example.seamstress` (`log stream --predicate 'subsystem == "com.example.seamstress"'`). Zero logging on hot `mouseMoved` / per-frame `mouseDragged` paths.
 
 ## Build, Test & Verify
 

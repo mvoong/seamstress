@@ -92,4 +92,35 @@ final class SpaceLayoutStoreTests: XCTestCase {
         XCTAssertEqual(commit.framesToApply[1], CGRect(x: 0, y: 0, width: 1000, height: 400))
         XCTAssertEqual(commit.framesToApply[2], CGRect(x: 0, y: 400, width: 1000, height: 400))
     }
+
+    func testDetachUndoSnapshotRestoresPreDetachLayoutForLateOptionPress() {
+        let store = SpaceLayoutStore()
+        let p1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: CGRect(x: 50, y: 50, width: 400, height: 300), boundsForSpace: bounds)
+        let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+
+        // Detach window 1 without Option -> 2 expands to full screen
+        let detached = store.detachByUserDrag(windowID: 1, currentFrame: CGRect(x: 0, y: 0, width: 500, height: 800), cursor: CGPoint(x: 200, y: 20))!
+        XCTAssertFalse(store.isTiled(1))
+        XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA), [2: boundsA])
+
+        // User presses Option within grace window -> restore snapshot so 1 and 2 can swap
+        XCTAssertTrue(store.restoreDetachSnapshot(detached.undo))
+        XCTAssertTrue(store.isTiled(1))
+        XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA)[1], CGRect(x: 0, y: 0, width: 500, height: 800))
+        XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA)[2], CGRect(x: 500, y: 0, width: 500, height: 800))
+    }
+
+    func testManualResizeDetachesAndExpandsSibling() {
+        let store = SpaceLayoutStore()
+        let p1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+        let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+
+        XCTAssertEqual(store.detachByManualResize(windowID: 1), spaceA)
+        XCTAssertFalse(store.isTiled(1))
+        XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA), [2: boundsA])
+    }
 }

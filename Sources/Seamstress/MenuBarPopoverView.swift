@@ -29,7 +29,7 @@ struct MenuBarPopoverView: View {
             Divider()
 
             HStack {
-                Text("v0.1.0")
+                Text("v\(appVersion)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -176,6 +176,10 @@ struct MenuBarPopoverView: View {
             row("Hover Seam", "Drag to resize · Double-click to collapse/50%")
         }
         .font(.caption)
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
     }
 
     private func row(_ key: String, _ desc: String) -> some View {

@@ -59,6 +59,54 @@ public struct VisibleSeam: Equatable, Sendable {
     }
 }
 
+/// Result of hit-testing a cursor point against visible seams.
+public enum SeamHit: Equatable, Sendable {
+    case single(VisibleSeam)
+    /// Cursor sits at the junction of a vertical and horizontal seam (e.g. `┼` or `├`),
+    /// allowing simultaneous 2-axis resizing.
+    case intersection(vertical: VisibleSeam, horizontal: VisibleSeam)
+
+    public var spaceKey: SpaceKey {
+        switch self {
+        case .single(let s): return s.spaceKey
+        case .intersection(let v, _): return v.spaceKey
+        }
+    }
+
+    public var participatingWindowIDs: Set<WindowID> {
+        switch self {
+        case .single(let s): return s.participatingWindowIDs
+        case .intersection(let v, let h): return v.participatingWindowIDs.union(h.participatingWindowIDs)
+        }
+    }
+
+    public var allSeams: [VisibleSeam] {
+        switch self {
+        case .single(let s): return [s]
+        case .intersection(let v, let h): return [v, h]
+        }
+    }
+
+    public func contains(_ point: CGPoint) -> Bool {
+        switch self {
+        case .single(let s):
+            return s.hitRect.contains(point)
+        case .intersection(let v, let h):
+            return v.hitRect.contains(point) && h.hitRect.contains(point)
+        }
+    }
+
+    /// Stable identifier pair for change detection on hover.
+    public var identityKey: String {
+        switch self {
+        case .single(let s):
+            return "\(s.spaceKey):\(s.splitID)"
+        case .intersection(let v, let h):
+            return "\(v.spaceKey):\(v.splitID)+\(h.splitID)"
+        }
+    }
+}
+
 /// Result of computing a live seam drag update for a cursor position.
 public struct SeamDragUpdate: Equatable, Sendable {
     public let ratio: CGFloat
@@ -125,6 +173,37 @@ public enum SeamGeometry {
 
         collect(node: first, spaceKey: spaceKey, bounds: firstRect, depth: depth + 1, into: &result)
         collect(node: second, spaceKey: spaceKey, bounds: secondRect, depth: depth + 1, into: &result)
+    }
+
+    /// Hit-test `point` against a precomputed list of visible seams, returning either a
+    /// single seam or a 2-axis intersection (`┼` / `├` / `┤` / `┬` / `┴`) when both a vertical
+    /// and horizontal seam's hit strips overlap at `point`.
+    public static func hitTestTarget(point: CGPoint, seams: [VisibleSeam]) -> SeamHit? {
+        var bestVertical: (seam: VisibleSeam, dist: CGFloat)?
+        var bestHorizontal: (seam: VisibleSeam, dist: CGFloat)?
+
+        for seam in seams {
+            guard seam.hitRect.contains(point) else { continue }
+            switch seam.axis {
+            case .vertical:
+                let dist = abs(point.x - seam.seamPosition)
+                if bestVertical == nil || dist < bestVertical!.dist || (dist == bestVertical!.dist && seam.depth < bestVertical!.seam.depth) {
+                    bestVertical = (seam, dist)
+                }
+            case .horizontal:
+                let dist = abs(point.y - seam.seamPosition)
+                if bestHorizontal == nil || dist < bestHorizontal!.dist || (dist == bestHorizontal!.dist && seam.depth < bestHorizontal!.seam.depth) {
+                    bestHorizontal = (seam, dist)
+                }
+            }
+        }
+
+        if let v = bestVertical, let h = bestHorizontal, v.seam.spaceKey == h.seam.spaceKey {
+            return .intersection(vertical: v.seam, horizontal: h.seam)
+        }
+        if let v = bestVertical { return .single(v.seam) }
+        if let h = bestHorizontal { return .single(h.seam) }
+        return nil
     }
 
     /// Hit-test `point` against a precomputed list of visible seams.
