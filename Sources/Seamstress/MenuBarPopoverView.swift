@@ -147,11 +147,26 @@ struct MenuBarPopoverView: View {
     }
 
     private var controlsSection: some View {
-        Toggle("Launch at login", isOn: Binding(
-            get: { appState.launchAtLogin },
-            set: { appState.setLaunchAtLogin($0) }
-        ))
-        .font(.subheadline)
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Show menu bar icon", isOn: Binding(
+                get: { appState.showMenuBarIcon },
+                set: { appState.setShowMenuBarIcon($0) }
+            ))
+            .font(.subheadline)
+
+            if !appState.showMenuBarIcon {
+                Text("Reopen Seamstress from Spotlight or Finder to access controls.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Toggle("Launch at login", isOn: Binding(
+                get: { appState.launchAtLogin },
+                set: { appState.setLaunchAtLogin($0) }
+            ))
+            .font(.subheadline)
+        }
     }
 
     private var cheatSheet: some View {

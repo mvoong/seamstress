@@ -43,7 +43,7 @@ Works passively with both standard titlebar dragging and macOS drag-anywhere ges
 - **`SkyLightBridge.swift` & `DisplayObserver.swift`**: Dynamic `dlopen`/`dlsym` read-only queries for active native Spaces per display UUID and background cursor updates, refreshed on screen/Space notifications.
 - **`WindowEventMonitor.swift`**: Attaches `AXObserver` only to PIDs that currently own tiled windows (close/minimize), plus `NSWorkspace` hide/terminate observers and a lightweight CG-only sanity sweep for fullscreen or vanished windows.
 - **`DropPreviewOverlay.swift` & `SeamHighlightOverlay.swift`**: Non-activating, click-through `NSPanel` overlays with animations disabled (`CATransaction.setDisableActions(true)`) for instant visual feedback.
-- **`WindowManager.swift`, `MenuBarPopoverView.swift`, `AppDelegate.swift`**: Menu bar app (`LSUIElement`), Accessibility permission gate with live polling, current-space layout minimap, and launch-at-login (`SMAppService.mainApp`).
+- **`WindowManager.swift`, `MenuBarPopoverView.swift`, `AppDelegate.swift`**: Menu bar app (`LSUIElement`), optional hidden menu bar icon (reopening Seamstress from Spotlight/Finder opens a standalone controls window), Accessibility permission gate with live polling, current-space layout minimap, and launch-at-login (`SMAppService.mainApp`).
 
 ## Build, Test & Install
 

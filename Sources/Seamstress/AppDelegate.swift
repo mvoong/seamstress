@@ -5,15 +5,23 @@ import SwiftUI
 
 final class AppState: ObservableObject {
     @Published var isEnabled: Bool = true
+    @Published var showMenuBarIcon: Bool = true
     @Published var isAccessibilityTrusted: Bool = AXIsProcessTrusted()
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
 
     var onEnabledChanged: ((Bool) -> Void)?
+    var onShowMenuBarIconChanged: ((Bool) -> Void)?
 
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "seamstress.enabled")
         onEnabledChanged?(enabled)
+    }
+
+    func setShowMenuBarIcon(_ show: Bool) {
+        showMenuBarIcon = show
+        UserDefaults.standard.set(show, forKey: "seamstress.showMenuBarIcon")
+        onShowMenuBarIconChanged?(show)
     }
 
     func requestAccessibility() {
@@ -55,14 +63,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var controlWindow: NSWindow?
     private var trustPollTimer: Timer?
-    private var clickOutsideMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         if UserDefaults.standard.object(forKey: "seamstress.enabled") != nil {
             appState.isEnabled = UserDefaults.standard.bool(forKey: "seamstress.enabled")
+        }
+        if UserDefaults.standard.object(forKey: "seamstress.showMenuBarIcon") != nil {
+            appState.showMenuBarIcon = UserDefaults.standard.bool(forKey: "seamstress.showMenuBarIcon")
         }
 
         appState.onEnabledChanged = { [weak self] enabled in
@@ -75,7 +86,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.updateStatusIcon()
         }
 
+        appState.onShowMenuBarIconChanged = { [weak self] show in
+            guard let self else { return }
+            if !show {
+                self.popover?.performClose(nil)
+            }
+            self.statusItem?.isVisible = show
+        }
+
         setupStatusItem()
+        statusItem?.isVisible = appState.showMenuBarIcon
 
         if appState.refreshTrust() {
             if appState.isEnabled {
@@ -85,10 +105,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.requestAccessibility()
             startTrustPolling()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.showPopover()
+                self?.showControls()
             }
         }
         updateStatusIcon()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    /// Reopening Seamstress (Spotlight, Finder, `open`) brings up controls even when the
+    /// menu bar icon is hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showControls()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -134,11 +165,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func showControls() {
+        if appState.showMenuBarIcon, statusItem?.isVisible == true {
+            showPopover()
+        } else {
+            showControlWindow()
+        }
+    }
+
     private func showPopover() {
         guard let button = statusItem?.button, let popover else { return }
         _ = appState.refreshTrust()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showControlWindow() {
+        _ = appState.refreshTrust()
+        if let existing = controlWindow {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let hosting = NSHostingController(
+            rootView: MenuBarPopoverView(appState: appState, windowManager: windowManager)
+        )
+        let win = NSWindow(contentViewController: hosting)
+        win.title = "Seamstress"
+        win.styleMask = [.titled, .closable]
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        controlWindow = win
     }
 
     private func startTrustPolling() {
