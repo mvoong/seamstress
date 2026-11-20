@@ -54,6 +54,10 @@ final class WindowManager: ObservableObject {
     /// Spaces are never re-adopted on later Space switches).
     private var probedSpaces: Set<SpaceKey> = []
     private var pendingTopologyReapply: DispatchWorkItem?
+    /// Suppresses `runSanitySweep()` briefly after wake, unlock, or display topology changes
+    /// so transient WindowServer transitions never evict live tiled windows.
+    private var sanitySweepSuppressedUntil: TimeInterval = 0
+    private static let postWakeSweepGrace: TimeInterval = 2.5
 
     init() {
         wireCallbacks()
@@ -122,11 +126,26 @@ final class WindowManager: ObservableObject {
             self.seamDrag = nil
 
             if topologyChanged {
+                self.suppressSanitySweepForWakeGrace()
                 self.scheduleDebouncedTopologyReapply()
             } else {
                 self.adoptExistingLayoutsIfNeeded()
             }
             self.refreshSeamsAndUI()
+        }
+
+        displayObserver.onSessionActivityChanged = { [weak self] isActive in
+            guard let self, self.isRunning else { return }
+            if !isActive {
+                self.dropOverlay.hide()
+                self.seamOverlay.hide()
+                self.windowDrag = nil
+                self.seamDrag = nil
+                SeamstressLog.lifecycle.info("Session inactive (sleep/lock) — pausing sanity sweeps")
+            } else {
+                self.suppressSanitySweepForWakeGrace()
+                SeamstressLog.lifecycle.info("Session active (wake/unlock) — resuming after grace window")
+            }
         }
 
         eventMonitor.onWindowBecameUnavailable = { [weak self] wid in
@@ -720,11 +739,19 @@ final class WindowManager: ObservableObject {
 
     // MARK: - Maintenance & UI sync
 
+    private func suppressSanitySweepForWakeGrace() {
+        let target = ProcessInfo.processInfo.systemUptime + Self.postWakeSweepGrace
+        if target > sanitySweepSuppressedUntil {
+            sanitySweepSuppressedUntil = target
+        }
+    }
+
     /// Debounce topology re-apply after wake or monitor plug/unplug bursts (~0.6s settle).
     private func scheduleDebouncedTopologyReapply() {
         pendingTopologyReapply?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isRunning else { return }
+            guard !self.displayObserver.isSessionInactive else { return }
             _ = self.displayObserver.refresh()
             self.reapplyActiveSpaces()
             self.adoptExistingLayoutsIfNeeded()
@@ -738,11 +765,20 @@ final class WindowManager: ObservableObject {
     /// existing on-screen window geometry and adopt close flush-tiled matches into the BSP
     /// store without moving or jittering any windows.
     private func adoptExistingLayoutsIfNeeded() {
+        // Never probe while the screen is locked or displays are asleep — otherwise spaces
+        // would be permanently marked probed while windows are off-screen/unavailable.
+        guard !displayObserver.isSessionInactive else { return }
+
         let displays = displayObserver.displays
-        let unprobed = displays.filter { !probedSpaces.contains($0.spaceKey) && store.tree(for: $0.spaceKey).isEmpty }
+        let unprobed = displays.filter {
+            !displayObserver.isDisplayAsleep($0.displayID) &&
+            !probedSpaces.contains($0.spaceKey) &&
+            store.tree(for: $0.spaceKey).isEmpty
+        }
         guard !unprobed.isEmpty else { return }
 
         let onScreen = axBridge.onScreenNormalWindows()
+        guard !onScreen.isEmpty else { return }
         let snapByID = Dictionary(uniqueKeysWithValues: onScreen.map { ($0.windowID, $0) })
 
         for display in unprobed {
@@ -804,24 +840,31 @@ final class WindowManager: ObservableObject {
     /// that closed, minimized, hid, or entered native macOS fullscreen without sending an AX event.
     private func runSanitySweep() {
         guard isRunning, seamDrag == nil, windowDrag == nil else { return }
-        let activeSpaces = displayObserver.activeSpaces()
-        guard !activeSpaces.isEmpty else { return }
+        guard !displayObserver.isSessionInactive else { return }
+        guard ProcessInfo.processInfo.systemUptime >= sanitySweepSuppressedUntil else { return }
 
-        let activeSpaceKeys = Set(activeSpaces.map(\.spaceKey))
+        let awakeSpaces = displayObserver.displays.filter { !displayObserver.isDisplayAsleep($0.displayID) }
+        guard !awakeSpaces.isEmpty else { return }
+
+        let activeSpaceKeys = Set(awakeSpaces.map(\.spaceKey))
         let tiledOnActiveSpaces = store.allTiledWindowIDs.filter { wid in
             guard let key = store.spaceKey(for: wid) else { return false }
             return activeSpaceKeys.contains(key)
         }
         guard !tiledOnActiveSpaces.isEmpty else { return }
 
-        let onScreen = Dictionary(
-            uniqueKeysWithValues: axBridge.onScreenNormalWindows().map { ($0.windowID, $0) }
-        )
+        let onScreenList = axBridge.onScreenNormalWindows()
+        // During transient lock/sleep/reconfiguration states, WindowServer can momentarily
+        // report zero on-screen normal windows; never wipe layouts on an empty snapshot.
+        guard !onScreenList.isEmpty else { return }
+
+        let onScreen = Dictionary(uniqueKeysWithValues: onScreenList.map { ($0.windowID, $0) })
 
         var affectedSpaces: Set<SpaceKey> = []
         for wid in tiledOnActiveSpaces {
             guard let snap = onScreen[wid] else {
                 if let space = store.handleWindowUnavailable(wid) {
+                    SeamstressLog.layout.info("Sanity sweep cleared off-screen window \(wid) in \(space.description, privacy: .public)")
                     affectedSpaces.insert(space)
                 }
                 axBridge.forget(windowID: wid)
@@ -834,6 +877,7 @@ final class WindowManager: ObservableObject {
                abs(snap.bounds.height - display.fullFrameCG.height) <= 2,
                display.fullFrameCG.height > display.usableFrameCG.height + 10 {
                 if let space = store.handleWindowUnavailable(wid) {
+                    SeamstressLog.layout.info("Sanity sweep cleared fullscreen window \(wid) in \(space.description, privacy: .public)")
                     affectedSpaces.insert(space)
                 }
                 axBridge.forget(windowID: wid)

@@ -25,6 +25,7 @@ Lightweight, mouse-driven macOS tiling window manager (`com.example.seamstress`,
 - **No main-thread AX IPC:** All AX frame writes run on per-PID `.userInteractive` serial queues fronted by `PerPIDFrameCoalescer`. Terminated PIDs are evicted on `didTerminateApplicationNotification`.
 - **Z-order occlusion:** Seam hover and click-grab check front-to-back `CGWindowListCopyWindowInfo` so floating windows covering a seam or `┼` intersection are never intercepted.
 - **SIP-safe Space & constraint queries:** `SkyLightBridge` dynamically loads read-only functions (`CGSCopyManagedDisplaySpaces`, `CGSCopySpacesForWindows`, `CGSSetConnectionProperty` for `SetsCursorInBackground`, and `SLSWindowQueryWindows`/`SLSWindowIteratorGetConstraints`) via `dlopen`/`dlsym`.
+- **Sleep / screen-lock resilience:** `DisplayObserver.isSessionInactive` combines sleep/wake/lock notifications with live `CGSessionCopyCurrentDictionary` (`CGSSessionScreenIsLocked`) and `CGDisplayIsAsleep` checks. Both `runSanitySweep()` (plus a 2.5s post-wake grace window) and `adoptExistingLayoutsIfNeeded()` pause while the session is inactive so dark displays or lock screens never evict tiled layouts or permanently mark unprobed Spaces.
 - **Diagnostics:** Lightweight `os.Logger` under subsystem `com.example.seamstress` (`log stream --predicate 'subsystem == "com.example.seamstress"'`). Zero logging on hot `mouseMoved` / per-frame `mouseDragged` paths.
 
 ## Build, Test & Verify

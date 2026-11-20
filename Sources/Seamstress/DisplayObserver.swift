@@ -26,8 +26,35 @@ final class DisplayObserver {
     private(set) var displays: [DisplayInfo] = []
 
     var onDisplaysOrSpacesChanged: ((_ topologyChanged: Bool) -> Void)?
+    /// Called when the user session becomes inactive (screen locked, displays slept, or system sleeping)
+    /// or active again (woke / unlocked).
+    var onSessionActivityChanged: ((_ isActive: Bool) -> Void)?
 
     private var observers: [NSObjectProtocol] = []
+    private var distributedObservers: [NSObjectProtocol] = []
+    private var isSystemAsleep = false
+    private var areScreensAsleep = false
+    private var isLockedFromNotification = false
+
+    /// True while the screen is locked, the system is sleeping, or all displays are asleep.
+    /// Queries live CG session/display state in addition to notifications so launches that
+    /// happen while the screen is already locked or dark are detected immediately.
+    var isSessionInactive: Bool {
+        if isSystemAsleep || areScreensAsleep || isLockedFromNotification {
+            return true
+        }
+        if Self.isScreenLockedLive() {
+            return true
+        }
+        if !displays.isEmpty && displays.allSatisfy({ CGDisplayIsAsleep($0.displayID) != 0 }) {
+            return true
+        }
+        return false
+    }
+
+    func isDisplayAsleep(_ displayID: CGDirectDisplayID) -> Bool {
+        CGDisplayIsAsleep(displayID) != 0
+    }
 
     init() {
         refresh()
@@ -37,6 +64,7 @@ final class DisplayObserver {
         guard observers.isEmpty else { return }
         let nc = NotificationCenter.default
         let ws = NSWorkspace.shared.notificationCenter
+        let dnc = DistributedNotificationCenter.default()
 
         observers.append(nc.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -58,27 +86,95 @@ final class DisplayObserver {
             self.onDisplaysOrSpacesChanged?(false)
         })
 
-        for wakeName in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
-            observers.append(ws.addObserver(
-                forName: wakeName,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                guard let self else { return }
-                _ = self.refresh()
-                self.onDisplaysOrSpacesChanged?(true)
-            })
-        }
+        observers.append(ws.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.isSystemAsleep = true
+            self.onSessionActivityChanged?(false)
+        })
+
+        observers.append(ws.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.areScreensAsleep = true
+            self.onSessionActivityChanged?(false)
+        })
+
+        observers.append(ws.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.isSystemAsleep = false
+            _ = self.refresh()
+            if !self.isSessionInactive {
+                self.onSessionActivityChanged?(true)
+            }
+            self.onDisplaysOrSpacesChanged?(true)
+        })
+
+        observers.append(ws.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.areScreensAsleep = false
+            _ = self.refresh()
+            if !self.isSessionInactive {
+                self.onSessionActivityChanged?(true)
+            }
+            self.onDisplaysOrSpacesChanged?(true)
+        })
+
+        distributedObservers.append(dnc.addObserver(
+            forName: NSNotification.Name("com.apple.screenIsLocked"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.isLockedFromNotification = true
+            self.onSessionActivityChanged?(false)
+        })
+
+        distributedObservers.append(dnc.addObserver(
+            forName: NSNotification.Name("com.apple.screenIsUnlocked"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.isLockedFromNotification = false
+            _ = self.refresh()
+            if !self.isSessionInactive {
+                self.onSessionActivityChanged?(true)
+            }
+            self.onDisplaysOrSpacesChanged?(true)
+        })
     }
 
     func stopObserving() {
         let nc = NotificationCenter.default
         let ws = NSWorkspace.shared.notificationCenter
+        let dnc = DistributedNotificationCenter.default()
         for obs in observers {
             nc.removeObserver(obs)
             ws.removeObserver(obs)
         }
         observers.removeAll()
+        for obs in distributedObservers {
+            dnc.removeObserver(obs)
+        }
+        distributedObservers.removeAll()
+        isSystemAsleep = false
+        areScreensAsleep = false
+        isLockedFromNotification = false
     }
 
     /// Refreshes cached screens and active Space IDs. Returns true if display frames changed.
@@ -141,6 +237,13 @@ final class DisplayObserver {
 
     func activeSpaces() -> [(spaceKey: SpaceKey, bounds: CGRect)] {
         displays.map { ($0.spaceKey, $0.usableFrameCG) }
+    }
+
+    private static func isScreenLockedLive() -> Bool {
+        guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any] else {
+            return false
+        }
+        return (dict["CGSSessionScreenIsLocked"] as? Bool) == true
     }
 
     private static func displayUUID(for displayID: CGDirectDisplayID) -> String {
