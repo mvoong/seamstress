@@ -27,18 +27,21 @@ final class SpaceLayoutStoreTests: XCTestCase {
         XCTAssertEqual(result.framesToApply[1], CGRect(x: 500, y: 0, width: 500, height: 800))
     }
 
-    func testDetachRestoresSavedFloatingSizeUnderCursor() {
+    func testDetachRestoresSavedFloatingSizeUnderCursorAndExpandsSibling() {
         let store = SpaceLayoutStore()
         let original = CGRect(x: 200, y: 200, width: 640, height: 480)
-        let plan = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
-        _ = store.commitDrop(plan, draggedWindowID: 1, preDragFrame: original, boundsForSpace: bounds)
+        let plan1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(plan1, draggedWindowID: 1, preDragFrame: original, boundsForSpace: bounds)
+        let plan2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(plan2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
 
-        let detached = store.detachByUserDrag(windowID: 1, currentFrame: boundsA, cursor: CGPoint(x: 500, y: 20))
+        let leftHalf = CGRect(x: 0, y: 0, width: 500, height: 800)
+        let detached = store.detachByUserDrag(windowID: 1, currentFrame: leftHalf, cursor: CGPoint(x: 250, y: 20))
         XCTAssertNotNil(detached)
         XCTAssertFalse(store.isTiled(1))
         XCTAssertEqual(detached?.restoredFrame?.size, original.size)
-        // Window centered horizontally on cursor (500 - 320 = 180)
-        XCTAssertEqual(detached?.restoredFrame?.origin.x, 180)
+        // Sibling window 2 expands to fill the entire screen
+        XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA), [2: boundsA])
     }
 
     func testFloatingReplaceDisplacesTiledWindowAndRestoresItsFrame() {

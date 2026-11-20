@@ -19,7 +19,7 @@ A lightweight, mouse-driven macOS tiling window manager built around floating-by
 | **`⌥` + Drag** onto an occupied tiled window (center ~36%) | Swaps two tiled windows, or replaces the tiled window with a floating window (restoring the displaced window to its pre-tiled size). |
 | **`⌥` + Drag** a tiled window onto its own edge | Shrinks it to that half and leaves the opposite half empty. |
 | **Release `⌥` mid-drag** | Cancels tiling preview and lets the window drop as floating. |
-| **Normal Drag** (without `⌥`) on a tiled window | Detaches it back to floating, restores its pre-tiled size anchored under the cursor, and leaves its slot empty. |
+| **Normal Drag** (without `⌥`) on a tiled window | Detaches it back to floating, restores its pre-tiled size anchored under the cursor, and expands neighboring windows to fill the gap. |
 | **Close / Minimize / Hide / Quit** a tiled window | Automatically collapses its split so neighboring windows expand to fill the vacated space. |
 | **Hover Seam** (`±5pt` along any flush split line) | Shows a subtle hairline + grip handle and resize cursor (suppressed whenever a floating window sits in front of the seam). |
 | **Drag Seam** | Resizes all affected windows in real time. |

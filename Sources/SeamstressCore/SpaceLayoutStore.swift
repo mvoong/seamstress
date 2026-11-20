@@ -208,7 +208,8 @@ public final class SpaceLayoutStore {
     }
 
     /// Detach a tiled window when dragged normally (without Option).
-    /// Leaves its BSP slot `.empty` and returns the restored floating frame anchored under `cursor`.
+    /// Collapses its split so neighboring windows expand to fill the vacated space,
+    /// and returns the restored floating frame anchored under `cursor`.
     public func detachByUserDrag(
         windowID: WindowID,
         currentFrame: CGRect,
@@ -216,7 +217,7 @@ public final class SpaceLayoutStore {
     ) -> (restoredFrame: CGRect?, spaceKey: SpaceKey)? {
         guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
         var t = tree(for: space)
-        t.removeWindow(windowID)
+        t.removeWindowAndCollapse(windowID)
         store(t, for: space)
 
         let restored: CGRect?

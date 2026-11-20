@@ -497,8 +497,17 @@ final class WindowManager: ObservableObject {
         guard let detached = store.detachByUserDrag(windowID: windowID, currentFrame: currentFrame, cursor: cursor) else {
             return
         }
+        var framesToApply: [WindowID: CGRect] = [:]
+        if let bounds = displayObserver.usableBounds(for: detached.spaceKey) {
+            for (wid, rect) in store.frames(for: detached.spaceKey, screenBounds: bounds) {
+                framesToApply[wid] = rect
+            }
+        }
         if let restored = detached.restoredFrame {
-            axBridge.applyFrames([windowID: restored], crossMonitorSafe: false)
+            framesToApply[windowID] = restored
+        }
+        if !framesToApply.isEmpty {
+            axBridge.applyFrames(framesToApply, crossMonitorSafe: false)
         }
         refreshSeamsAndUI()
     }
