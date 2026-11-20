@@ -286,6 +286,41 @@ public struct LayoutTree: Equatable, Sendable {
         return true
     }
 
+    /// Remove `windowID` and immediately promote its sibling to fill the vacated space.
+    /// If `windowID` was the only leaf in the tree, resets to an empty root.
+    @discardableResult
+    public mutating func removeWindowAndCollapse(_ windowID: WindowID) -> Bool {
+        guard contains(windowID: windowID) else { return false }
+        if let collapsed = pruneWindow(windowID, in: root) {
+            root = collapseDoubleEmpty(collapsed)
+        } else {
+            root = .empty(id: allocID())
+        }
+        return true
+    }
+
+    private func pruneWindow(_ target: WindowID, in node: Node) -> Node? {
+        switch node {
+        case .empty:
+            return node
+        case .window(_, let wid):
+            return wid == target ? nil : node
+        case .split(let id, let axis, let ratio, let first, let second):
+            let newFirst = pruneWindow(target, in: first)
+            let newSecond = pruneWindow(target, in: second)
+            switch (newFirst, newSecond) {
+            case (nil, nil):
+                return nil
+            case (let surviving?, nil):
+                return surviving
+            case (nil, let surviving?):
+                return surviving
+            case (let f?, let s?):
+                return .split(id: id, axis: axis, ratio: ratio, first: f, second: s)
+            }
+        }
+    }
+
     /// Update the split ratio for `splitID`.
     @discardableResult
     public mutating func setRatio(splitID: NodeID, ratio: CGFloat) -> Bool {

@@ -25,6 +25,7 @@ struct CGWindowSnapshot: Equatable {
 final class AXWindowBridge {
     private let lock = NSLock()
     private var elementCache: [WindowID: (pid: pid_t, element: AXUIElement)] = [:]
+    private var lastAppliedFrames: [WindowID: CGRect] = [:]
     private var pidQueues: [pid_t: DispatchQueue] = [:]
     private var pidCoalescers: [pid_t: PerPIDFrameCoalescer] = [:]
     private var batchEnhancedRestore: [pid_t: Bool] = [:]
@@ -135,6 +136,7 @@ final class AXWindowBridge {
     func forget(windowID: WindowID) {
         lock.lock()
         elementCache.removeValue(forKey: windowID)
+        lastAppliedFrames.removeValue(forKey: windowID)
         lock.unlock()
     }
 
@@ -226,10 +228,7 @@ final class AXWindowBridge {
 
     /// Enqueue live frames during a seam drag. Uses per-PID latest-frame coalescing so
     /// fast apps resize at 60Hz+ and slow apps never accumulate an IPC backlog.
-    func enqueueLiveFrames(
-        _ frames: [WindowID: CGRect],
-        onMinSizeObserved: @escaping (WindowID, CGSize) -> Void
-    ) {
+    func enqueueLiveFrames(_ frames: [WindowID: CGRect]) {
         var grouped: [pid_t: [(WindowID, CGRect)]] = [:]
         for (wid, frame) in frames {
             guard let pid = pid(for: wid) else { continue }
@@ -244,7 +243,7 @@ final class AXWindowBridge {
             lock.unlock()
 
             if let batchToRun {
-                dispatchCoalescedBatch(pid: pid, batch: batchToRun, onMinSizeObserved: onMinSizeObserved)
+                dispatchCoalescedBatch(pid: pid, batch: batchToRun)
             }
         }
     }
@@ -323,25 +322,14 @@ final class AXWindowBridge {
 
     private func dispatchCoalescedBatch(
         pid: pid_t,
-        batch: [(WindowID, CGRect)],
-        onMinSizeObserved: @escaping (WindowID, CGSize) -> Void
+        batch: [(WindowID, CGRect)]
     ) {
         let q = queue(for: pid)
         q.async { [weak self] in
             guard let self else { return }
 
             for (wid, target) in batch {
-                if let actual = self.writeFrameSync(windowID: wid, pid: pid, target: target, crossMonitorSafe: false, readBack: true) {
-                    // If the app refused to shrink to requested size by > 4pt, report its enforced minimum
-                    var detectedMin = CGSize.zero
-                    if actual.width > target.width + 4 { detectedMin.width = actual.width }
-                    if actual.height > target.height + 4 { detectedMin.height = actual.height }
-                    if detectedMin.width > 0 || detectedMin.height > 0 {
-                        DispatchQueue.main.async {
-                            onMinSizeObserved(wid, detectedMin)
-                        }
-                    }
-                }
+                self.writeFrameSync(windowID: wid, pid: pid, target: target, crossMonitorSafe: false)
             }
 
             self.lock.lock()
@@ -351,7 +339,7 @@ final class AXWindowBridge {
             self.lock.unlock()
 
             if let nextBatch {
-                self.dispatchCoalescedBatch(pid: pid, batch: nextBatch, onMinSizeObserved: onMinSizeObserved)
+                self.dispatchCoalescedBatch(pid: pid, batch: nextBatch)
             }
         }
     }
@@ -365,23 +353,26 @@ final class AXWindowBridge {
         return q
     }
 
-    @discardableResult
     private func writeFrameSync(
         windowID: WindowID,
         pid: pid_t,
         target: CGRect,
-        crossMonitorSafe: Bool,
-        readBack: Bool = false
-    ) -> CGRect? {
-        guard let el = resolveElement(windowID: windowID, pid: pid) else { return nil }
+        crossMonitorSafe: Bool
+    ) {
+        guard let el = resolveElement(windowID: windowID, pid: pid) else { return }
         AXUIElementSetMessagingTimeout(el, Self.axTimeout)
 
         var pos = target.origin
         var size = target.size
         guard let posVal = AXValueCreate(.cgPoint, &pos),
               let sizeVal = AXValueCreate(.cgSize, &size) else {
-            return nil
+            return
         }
+
+        lock.lock()
+        let previous = lastAppliedFrames[windowID]
+        lastAppliedFrames[windowID] = target
+        lock.unlock()
 
         if crossMonitorSafe {
             // Resize -> Move -> Resize handles macOS per-screen size clamping when crossing displays
@@ -390,19 +381,28 @@ final class AXWindowBridge {
             let sizeErr = AXUIElementSetAttributeValue(el, kAXSizeAttribute as CFString, sizeVal)
             if moveErr == .invalidUIElement || sizeErr == .invalidUIElement {
                 forget(windowID: windowID)
-                return nil
             }
         } else {
-            // Live resize on same display: position + size (one round-trip each, minimal latency)
-            let moveErr = AXUIElementSetAttributeValue(el, kAXPositionAttribute as CFString, posVal)
-            let sizeErr = AXUIElementSetAttributeValue(el, kAXSizeAttribute as CFString, sizeVal)
-            if moveErr == .invalidUIElement || sizeErr == .invalidUIElement {
+            // Shrinking: set Size BEFORE Position so moving a bottom/right window inward
+            // never pushes (newOrigin + oldSize) past the Dock/screen edge and gets clamped.
+            // Growing: set Position BEFORE Size so moving upward/leftward makes room first.
+            let shrinking = previous.map {
+                target.width < $0.width || target.height < $0.height
+            } ?? false
+
+            let err1: AXError
+            let err2: AXError
+            if shrinking {
+                err1 = AXUIElementSetAttributeValue(el, kAXSizeAttribute as CFString, sizeVal)
+                err2 = AXUIElementSetAttributeValue(el, kAXPositionAttribute as CFString, posVal)
+            } else {
+                err1 = AXUIElementSetAttributeValue(el, kAXPositionAttribute as CFString, posVal)
+                err2 = AXUIElementSetAttributeValue(el, kAXSizeAttribute as CFString, sizeVal)
+            }
+            if err1 == .invalidUIElement || err2 == .invalidUIElement {
                 forget(windowID: windowID)
-                return nil
             }
         }
-
-        return readBack ? Self.readFrame(of: el) : nil
     }
 
     private static func readFrame(of element: AXUIElement) -> CGRect? {

@@ -74,6 +74,26 @@ final class LayoutTreeTests: XCTestCase {
         XCTAssertEqual(tree.windowFrames(in: screen)[102]?.width, 800)
     }
 
+    func testRemoveWindowAndCollapsePromotesSiblingToFillSpace() {
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 101)
+        tree.splitOccupied(leafID: tree.leafID(for: 101)!, edge: .right, with: 102)
+        tree.splitOccupied(leafID: tree.leafID(for: 102)!, edge: .bottom, with: 103)
+
+        // Closing 103 makes 102 expand to fill the entire right half
+        XCTAssertTrue(tree.removeWindowAndCollapse(103))
+        XCTAssertEqual(tree.windowFrames(in: screen)[101], CGRect(x: 0, y: 25, width: 800, height: 975))
+        XCTAssertEqual(tree.windowFrames(in: screen)[102], CGRect(x: 800, y: 25, width: 800, height: 975))
+
+        // Closing 102 makes 101 expand to fill the entire screen
+        XCTAssertTrue(tree.removeWindowAndCollapse(102))
+        XCTAssertEqual(tree.windowFrames(in: screen), [101: screen])
+
+        // Closing the last window resets to an empty root
+        XCTAssertTrue(tree.removeWindowAndCollapse(101))
+        XCTAssertTrue(tree.isEmpty)
+    }
+
     func testFlushSplitHasNoOverlapOrGapOnOddDimensions() {
         let odd = CGRect(x: 0, y: 0, width: 1513, height: 983)
         let (left, right, seamX) = odd.splitFlush(axis: .vertical, ratio: 0.5)

@@ -68,8 +68,8 @@ public struct SeamDragUpdate: Equatable, Sendable {
 }
 
 public enum SeamGeometry {
-    /// Total hit strip thickness in points (±4pt around the 0px seam).
-    public static let hitThickness: CGFloat = 8
+    /// Total hit strip thickness in points (±5pt around the 0px seam).
+    public static let hitThickness: CGFloat = 10
     /// Hairline visual indicator thickness in points.
     public static let visualThickness: CGFloat = 2
     /// Fallback minimum dimension per occupied leaf when app min size is unknown.

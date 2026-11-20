@@ -218,14 +218,14 @@ public final class SpaceLayoutStore {
     }
 
     /// Handle a tiled window closing, minimizing, hiding, or entering fullscreen.
-    /// Leaves its slot `.empty` (collapsing empty siblings automatically).
+    /// Collapses its split so neighboring windows expand to fill the vacated space.
     @discardableResult
     public func handleWindowUnavailable(_ windowID: WindowID) -> SpaceKey? {
         guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
         savedFloatingFrames.removeValue(forKey: windowID)
         learnedMinSizes.removeValue(forKey: windowID)
         var t = tree(for: space)
-        t.removeWindow(windowID)
+        t.removeWindowAndCollapse(windowID)
         store(t, for: space)
         return space
     }

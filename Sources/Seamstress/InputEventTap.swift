@@ -14,6 +14,9 @@ import SeamstressCore
 ///   window drags (titlebar drag and `⌥⌘` drag-anywhere) pass straight through to macOS untouched.
 final class InputEventTap {
     var onHoverCandidateChanged: ((_ seam: VisibleSeam?, _ point: CGPoint) -> Void)?
+    /// Synchronous fast Z-order check used on `leftMouseDown` if the user clicks a seam
+    /// before the async hover check has landed on main.
+    var isSeamUnoccludedSync: ((_ seam: VisibleSeam, _ point: CGPoint) -> Bool)?
     var onSeamDragBegin: ((_ seam: VisibleSeam, _ point: CGPoint) -> Void)?
     var onSeamDragMove: ((_ seam: VisibleSeam, _ point: CGPoint) -> Void)?
     var onSeamDragEnd: ((_ seam: VisibleSeam, _ point: CGPoint) -> Void)?
@@ -205,9 +208,23 @@ final class InputEventTap {
             let clickState = event.getIntegerValueField(.mouseEventClickState)
 
             lock.lock()
-            let candidate = unoccludedSeam
-            let hitsActiveSeam = candidate?.hitRect.contains(point) == true
-            if hitsActiveSeam, let seam = candidate {
+            var candidate = unoccludedSeam
+            let seams = visibleSeams
+            lock.unlock()
+
+            // Fast-click fallback: if the cursor moved onto a seam and clicked before
+            // the main-thread hover check finished, verify occlusion synchronously (~0.1ms).
+            var grabbedSeam: VisibleSeam?
+            if let existing = candidate, existing.hitRect.contains(point) {
+                grabbedSeam = existing
+            } else if let directHit = SeamGeometry.hitTest(point: point, seams: seams),
+                      isSeamUnoccludedSync?(directHit, point) == true {
+                grabbedSeam = directHit
+            }
+
+            lock.lock()
+            if let seam = grabbedSeam {
+                unoccludedSeam = seam
                 isLeftMouseDown = true
                 if clickState >= 2 {
                     swallowingDoubleClickUp = true

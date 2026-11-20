@@ -112,23 +112,26 @@ final class WindowManager: ObservableObject {
 
         eventMonitor.onWindowBecameUnavailable = { [weak self] wid in
             guard let self, self.isRunning else { return }
-            if self.store.handleWindowUnavailable(wid) != nil {
+            if let space = self.store.handleWindowUnavailable(wid) {
                 self.axBridge.forget(windowID: wid)
+                self.applyFramesIfActive(spaces: [space])
                 self.refreshSeamsAndUI()
             }
         }
 
         eventMonitor.onApplicationUnavailable = { [weak self] pid in
             guard let self, self.isRunning else { return }
-            var changed = false
+            var affectedSpaces: Set<SpaceKey> = []
             for wid in self.store.allTiledWindowIDs {
                 if self.axBridge.pid(for: wid) == pid {
-                    _ = self.store.handleWindowUnavailable(wid)
+                    if let space = self.store.handleWindowUnavailable(wid) {
+                        affectedSpaces.insert(space)
+                    }
                     self.axBridge.forget(windowID: wid)
-                    changed = true
                 }
             }
-            if changed {
+            if !affectedSpaces.isEmpty {
+                self.applyFramesIfActive(spaces: affectedSpaces)
                 self.refreshSeamsAndUI()
             }
         }
@@ -139,6 +142,11 @@ final class WindowManager: ObservableObject {
 
         inputTap.onHoverCandidateChanged = { [weak self] seam, point in
             self?.handleHoverCandidate(seam, at: point)
+        }
+
+        inputTap.isSeamUnoccludedSync = { [weak self] seam, point in
+            guard let self else { return false }
+            return !self.axBridge.isSeamPointOccluded(point, allowedWindowIDs: seam.participatingWindowIDs)
         }
 
         inputTap.onSeamDragBegin = { [weak self] seam, point in
@@ -272,9 +280,7 @@ final class WindowManager: ObservableObject {
                     ratio: update.ratio,
                     screenBounds: session.screenBounds
                 )
-                axBridge.enqueueLiveFrames(frames) { [weak self] wid, minSize in
-                    self?.store.recordMinimumSize(minSize, for: wid)
-                }
+                axBridge.enqueueLiveFrames(frames)
             } else {
                 seamDrag = session
             }
@@ -533,13 +539,14 @@ final class WindowManager: ObservableObject {
             uniqueKeysWithValues: axBridge.onScreenNormalWindows().map { ($0.windowID, $0) }
         )
 
-        var changed = false
+        var affectedSpaces: Set<SpaceKey> = []
         for wid in tiledOnActiveSpaces {
             guard let snap = onScreen[wid] else {
                 // Not on screen while its Space is active -> closed, minimized, hidden, or moved to another Space
-                _ = store.handleWindowUnavailable(wid)
+                if let space = store.handleWindowUnavailable(wid) {
+                    affectedSpaces.insert(space)
+                }
                 axBridge.forget(windowID: wid)
-                changed = true
                 continue
             }
             // Detect native macOS fullscreen (window covers full screen including menu bar)
@@ -548,14 +555,29 @@ final class WindowManager: ObservableObject {
                abs(snap.bounds.width - display.fullFrameCG.width) <= 2,
                abs(snap.bounds.height - display.fullFrameCG.height) <= 2,
                display.fullFrameCG.height > display.usableFrameCG.height + 10 {
-                _ = store.handleWindowUnavailable(wid)
+                if let space = store.handleWindowUnavailable(wid) {
+                    affectedSpaces.insert(space)
+                }
                 axBridge.forget(windowID: wid)
-                changed = true
             }
         }
 
-        if changed {
+        if !affectedSpaces.isEmpty {
+            applyFramesIfActive(spaces: affectedSpaces)
             refreshSeamsAndUI()
+        }
+    }
+
+    private func applyFramesIfActive(spaces: Set<SpaceKey>) {
+        var frames: [WindowID: CGRect] = [:]
+        for space in spaces {
+            guard let bounds = displayObserver.usableBounds(for: space) else { continue }
+            for (wid, rect) in store.frames(for: space, screenBounds: bounds) {
+                frames[wid] = rect
+            }
+        }
+        if !frames.isEmpty {
+            axBridge.applyFrames(frames, crossMonitorSafe: false)
         }
     }
 

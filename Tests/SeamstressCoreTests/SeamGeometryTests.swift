@@ -14,10 +14,10 @@ final class SeamGeometryTests: XCTestCase {
         let seams = SeamGeometry.seams(in: tree, spaceKey: space, bounds: screen)
         XCTAssertEqual(seams.count, 1)
         XCTAssertEqual(seams[0].seamPosition, 500)
-        XCTAssertEqual(seams[0].hitRect, CGRect(x: 496, y: 0, width: 8, height: 800))
+        XCTAssertEqual(seams[0].hitRect, CGRect(x: 495, y: 0, width: 10, height: 800))
 
-        // Inside 8px hit strip
-        XCTAssertEqual(SeamGeometry.hitTest(point: CGPoint(x: 503, y: 300), seams: seams)?.splitID, seams[0].splitID)
+        // Inside 10px hit strip
+        XCTAssertEqual(SeamGeometry.hitTest(point: CGPoint(x: 504, y: 300), seams: seams)?.splitID, seams[0].splitID)
         // Outside hit strip
         XCTAssertNil(SeamGeometry.hitTest(point: CGPoint(x: 506, y: 300), seams: seams))
 
