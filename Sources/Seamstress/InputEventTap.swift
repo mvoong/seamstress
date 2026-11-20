@@ -208,7 +208,7 @@ final class InputEventTap {
             let clickState = event.getIntegerValueField(.mouseEventClickState)
 
             lock.lock()
-            var candidate = unoccludedSeam
+            let candidate = unoccludedSeam
             let seams = visibleSeams
             lock.unlock()
 
