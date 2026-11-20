@@ -5,6 +5,7 @@ A lightweight, mouse-driven macOS tiling window manager built around floating-by
 ## Design Philosophy
 
 - **Unmanaged by default:** New windows open wherever macOS places them. Seamstress never hijacks or rearranges windows until you explicitly tile them.
+- **Relaunch layout adoption:** When Seamstress starts (and on the first visit to each Space), it inspects existing window frames and automatically reconstructs close flush-tiled arrangements (with their exact split ratios) into live BSP trees without moving windows, while leaving ordinary floating windows untouched.
 - **Native macOS Spaces & multi-monitor:** Each `(display, native Space)` maintains its own flush (`0px` gap) binary split tree (BSP). SIP stays enabled; Seamstress uses read-only Space queries and never relies on virtual-workspace workarounds.
 - **Responsive & low overhead:** Idle mouse movement performs zero Accessibility IPC. Live seam resizing runs off the main thread on per-process serial queues with latest-frame coalescing so sluggish apps never stall your cursor or other windows.
 
@@ -35,6 +36,7 @@ Works passively with both standard titlebar dragging and macOS drag-anywhere ges
 - **`DropPlanner.swift`**: Pure Option-drag hit-testing and drop-zone preview rect computation.
 - **`SeamGeometry.swift`**: Flush `10pt` hit-strip extraction, seam hit-testing, minimum-extent ratio clamping, and `> 90%` empty-slot collapse detection.
 - **`SpaceLayoutStore.swift`**: Manages per-`(displayUUID, nativeSpaceID)` trees, pre-tiled floating frames, and cross-monitor moves/swaps.
+- **`LayoutReconstructor.swift`**: Pure guillotine-cut BSP reconstructor that converts existing flush-arranged windows into `LayoutTree`s on launch while ignoring floating windows.
 - **`FrameCoalescer.swift`**: Per-PID latest-frame coalescing state machine for live resizing.
 
 ### `Sources/Seamstress` (macOS AppKit / SwiftUI runtime)

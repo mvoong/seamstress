@@ -35,6 +35,21 @@ public final class SpaceLayoutStore {
         trees[spaceKey] ?? LayoutTree()
     }
 
+    /// Adopt a reconstructed layout tree for an empty `spaceKey` (e.g. on relaunch).
+    /// Returns the adopted window IDs, or empty if `spaceKey` already has a layout or any
+    /// window is already tracked elsewhere.
+    @discardableResult
+    public func adoptReconstructedTree(_ tree: LayoutTree, for spaceKey: SpaceKey) -> [WindowID] {
+        guard trees[spaceKey] == nil, !tree.isEmpty else { return [] }
+        let wids = tree.allWindowIDs
+        guard wids.allSatisfy({ windowToSpace[$0] == nil }) else { return [] }
+        trees[spaceKey] = tree
+        for wid in wids {
+            windowToSpace[wid] = spaceKey
+        }
+        return wids
+    }
+
     public func spaceKey(for windowID: WindowID) -> SpaceKey? {
         windowToSpace[windowID]
     }

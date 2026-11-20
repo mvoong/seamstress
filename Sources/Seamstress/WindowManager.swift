@@ -44,6 +44,9 @@ final class WindowManager: ObservableObject {
 
     private var windowDrag: WindowDragSession?
     private var seamDrag: SeamDragSession?
+    /// Spaces already probed for existing tiled layouts since launch (so manually cleared
+    /// Spaces are never re-adopted on later Space switches).
+    private var probedSpaces: Set<SpaceKey> = []
 
     init() {
         wireCallbacks()
@@ -67,6 +70,7 @@ final class WindowManager: ObservableObject {
         }
 
         isRunning = true
+        adoptExistingLayoutsIfNeeded()
         refreshSeamsAndUI()
     }
 
@@ -106,6 +110,8 @@ final class WindowManager: ObservableObject {
 
             if topologyChanged {
                 self.reapplyActiveSpaces()
+            } else {
+                self.adoptExistingLayoutsIfNeeded()
             }
             self.refreshSeamsAndUI()
         }
@@ -508,6 +514,57 @@ final class WindowManager: ObservableObject {
     }
 
     // MARK: - Maintenance & UI sync
+
+    /// On launch (and the first time each native Space is visited after launch), inspect
+    /// existing on-screen window geometry and adopt close flush-tiled matches into the BSP
+    /// store without moving or jittering any windows.
+    private func adoptExistingLayoutsIfNeeded() {
+        let displays = displayObserver.displays
+        let unprobed = displays.filter { !probedSpaces.contains($0.spaceKey) && store.tree(for: $0.spaceKey).isEmpty }
+        guard !unprobed.isEmpty else { return }
+
+        let onScreen = axBridge.onScreenNormalWindows()
+        let snapByID = Dictionary(uniqueKeysWithValues: onScreen.map { ($0.windowID, $0) })
+
+        for display in unprobed {
+            let spaceKey = display.spaceKey
+            probedSpaces.insert(spaceKey)
+
+            let usable = display.usableFrameCG
+            let full = display.fullFrameCG
+            let candidates: [WindowCandidate] = onScreen.compactMap { snap in
+                guard !store.isTiled(snap.windowID) else { return nil }
+                // Skip native macOS fullscreen windows covering the menu bar
+                if full.height > usable.height + 10,
+                   abs(snap.bounds.width - full.width) <= 2,
+                   abs(snap.bounds.height - full.height) <= 2 {
+                    return nil
+                }
+                let center = CGPoint(x: snap.bounds.midX, y: snap.bounds.midY)
+                guard usable.contains(center) else { return nil }
+                return WindowCandidate(windowID: snap.windowID, frame: snap.bounds)
+            }
+
+            guard let reconstructed = LayoutReconstructor.reconstruct(windows: candidates, in: usable) else {
+                continue
+            }
+
+            // Confirm matched windows are standard resizable windows before adopting.
+            let matchedIDs = reconstructed.allWindowIDs
+            let allTileable = matchedIDs.allSatisfy { wid in
+                guard let snap = snapByID[wid] else { return false }
+                return axBridge.isStandardTileableWindow(windowID: wid, pid: snap.ownerPID)
+            }
+            guard allTileable else { continue }
+
+            let adopted = store.adoptReconstructedTree(reconstructed, for: spaceKey)
+            for wid in adopted {
+                if let snap = snapByID[wid] {
+                    axBridge.register(windowID: wid, pid: snap.ownerPID)
+                }
+            }
+        }
+    }
 
     private func reapplyActiveSpaces() {
         var frames: [WindowID: CGRect] = [:]

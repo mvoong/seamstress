@@ -10,6 +10,7 @@ Lightweight, mouse-driven macOS tiling window manager (`com.example.seamstress`,
   - `DropPlanner.swift`: Option-drag zone classification (empty center=fill / edge=half; occupied center=swap / outer=split; own edge=shrink).
   - `SeamGeometry.swift`: Flush `10pt` (`±5pt`) seam hit strips, hit-testing, ratio clamping, and `> 90%` collapse-to-empty detection.
   - `SpaceLayoutStore.swift`: Per-`(displayUUID, spaceID)` tree store, saved pre-tiled floating frames, cross-monitor moves/swaps.
+  - `LayoutReconstructor.swift`: Pure startup/first-Space-visit BSP reconstructor from on-screen window frames (14pt edge tolerance, floating-window guardrails).
   - `FrameCoalescer.swift`: Per-PID latest-frame coalescing state machine for live AX resize batches.
 - `Sources/Seamstress/`: macOS menu bar runtime (`InputEventTap`, `AXWindowBridge`, `SkyLightBridge`, `DisplayObserver`, `WindowEventMonitor`, `DropPreviewOverlay`, `SeamHighlightOverlay`, `WindowManager`, `MenuBarPopoverView`, `AppDelegate`, `main`). Supports hiding the menu bar icon (`seamstress.showMenuBarIcon` in `UserDefaults`); reopening the app presents a standalone controls window.
 - `Tests/SeamstressCoreTests/`: Headless XCTest suite covering all core invariants.

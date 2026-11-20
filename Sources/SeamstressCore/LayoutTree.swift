@@ -68,6 +68,11 @@ public struct LayoutTree: Equatable, Sendable {
         self.nextID = 2
     }
 
+    internal init(root: Node, nextID: NodeID) {
+        self.root = root
+        self.nextID = nextID
+    }
+
     private mutating func allocID() -> NodeID {
         defer { nextID += 1 }
         return nextID
