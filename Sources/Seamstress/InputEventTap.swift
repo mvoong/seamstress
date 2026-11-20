@@ -16,7 +16,12 @@ final class InputEventTap {
     /// Returns true when the snap/split modifier is active: either `⌥` (Option) or `⌃⌘`
     /// (Control+Command, used by macOS's `NSWindowShouldDragOnGesture` drag-anywhere gesture).
     static func isSnapModifierActive(_ flags: CGEventFlags) -> Bool {
-        flags.contains(.maskAlternate) || flags.contains([.maskControl, .maskCommand])
+        flags.contains(.maskAlternate) || isGestureDragModifierActive(flags)
+    }
+
+    /// Returns true when `⌃⌘` (Control+Command) is held for macOS drag-anywhere window moves.
+    static func isGestureDragModifierActive(_ flags: CGEventFlags) -> Bool {
+        flags.contains([.maskControl, .maskCommand])
     }
 
     var onHoverCandidateChanged: ((_ hit: SeamHit?, _ point: CGPoint) -> Void)?
@@ -28,7 +33,7 @@ final class InputEventTap {
     var onSeamDragEnd: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
     var onSeamDoubleClick: ((_ hit: SeamHit) -> Void)?
 
-    var onWindowMouseDown: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
+    var onWindowMouseDown: ((_ point: CGPoint, _ snapModifierDown: Bool, _ isGestureDrag: Bool) -> Void)?
     var onWindowMouseDragged: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
     var onWindowMouseUp: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
     var onSnapModifierChangedDuringDrag: ((_ snapModifierDown: Bool, _ point: CGPoint) -> Void)?
@@ -260,8 +265,9 @@ final class InputEventTap {
             lastSnapModifierDown = snapModifierDown
             lock.unlock()
 
+            let isGestureDrag = Self.isGestureDragModifierActive(event.flags)
             DispatchQueue.main.async { [weak self] in
-                self?.onWindowMouseDown?(point, snapModifierDown)
+                self?.onWindowMouseDown?(point, snapModifierDown, isGestureDrag)
             }
             return event
 

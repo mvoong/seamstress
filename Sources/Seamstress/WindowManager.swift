@@ -34,6 +34,7 @@ final class WindowManager: ObservableObject {
         let window: CGWindowSnapshot
         let pressPoint: CGPoint
         let preDragFrame: CGRect
+        let startedWithGestureDragModifier: Bool
         var phase: Phase = .pending
         var currentPlan: DropPlan?
         var detachUndo: DetachUndoSnapshot?
@@ -209,8 +210,8 @@ final class WindowManager: ObservableObject {
             self?.handleSeamDoubleClick(hit)
         }
 
-        inputTap.onWindowMouseDown = { [weak self] point, snapModifierDown in
-            self?.handleWindowMouseDown(at: point, snapModifierDown: snapModifierDown)
+        inputTap.onWindowMouseDown = { [weak self] point, snapModifierDown, isGestureDrag in
+            self?.handleWindowMouseDown(at: point, snapModifierDown: snapModifierDown, isGestureDrag: isGestureDrag)
         }
 
         inputTap.onWindowMouseDragged = { [weak self] point, snapModifierDown in
@@ -507,7 +508,7 @@ final class WindowManager: ObservableObject {
 
     // MARK: - Window drag (normal detach, manual resize detach & Option / Ctrl+Cmd drag tiling)
 
-    private func handleWindowMouseDown(at point: CGPoint, snapModifierDown: Bool) {
+    private func handleWindowMouseDown(at point: CGPoint, snapModifierDown: Bool, isGestureDrag: Bool) {
         guard isRunning else { return }
         seamOverlay.hide()
         dropOverlay.hide()
@@ -521,6 +522,7 @@ final class WindowManager: ObservableObject {
             window: top,
             pressPoint: point,
             preDragFrame: top.bounds,
+            startedWithGestureDragModifier: isGestureDrag,
             phase: .pending,
             currentPlan: nil
         )
@@ -542,7 +544,9 @@ final class WindowManager: ObservableObject {
 
             let dw = abs(liveBounds.width - session.window.bounds.width)
             let dh = abs(liveBounds.height - session.window.bounds.height)
-            if dw > 1.5 || dh > 1.5 {
+            let isPotentialManualResize = !session.startedWithGestureDragModifier
+                && session.window.bounds.isPointNearEdge(session.pressPoint)
+            if isPotentialManualResize && (dw > 1.5 || dh > 1.5) {
                 // Native window edge/corner resize: if the window was tiled, detach it cleanly
                 // and expand neighbors so no stale phantom seam remains behind.
                 if store.isTiled(session.window.windowID),

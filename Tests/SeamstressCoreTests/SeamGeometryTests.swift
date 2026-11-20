@@ -76,4 +76,21 @@ final class SeamGeometryTests: XCTestCase {
             XCTFail("Expected single vertical seam at (500, 150), got \(String(describing: verticalOnly))")
         }
     }
+
+    func testIsPointNearEdgeDistinguishesWindowInteriorFromBorder() {
+        let win = CGRect(x: 100, y: 200, width: 800, height: 600)
+
+        // Window interior (e.g. Ctrl+Cmd drag-anywhere start) is not near an edge
+        XCTAssertFalse(win.isPointNearEdge(CGPoint(x: 500, y: 500)))
+        XCTAssertFalse(win.isPointNearEdge(CGPoint(x: 120, y: 220)))
+
+        // Perimeter, corners, and just outside the border (native resize hotzone) are near an edge
+        XCTAssertTrue(win.isPointNearEdge(CGPoint(x: 100, y: 500)))
+        XCTAssertTrue(win.isPointNearEdge(CGPoint(x: 902, y: 500)))
+        XCTAssertTrue(win.isPointNearEdge(CGPoint(x: 105, y: 205)))
+        XCTAssertTrue(win.isPointNearEdge(CGPoint(x: 500, y: 798)))
+
+        // Far outside the window is not near an edge
+        XCTAssertFalse(win.isPointNearEdge(CGPoint(x: 50, y: 500)))
+    }
 }

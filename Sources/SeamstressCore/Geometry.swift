@@ -119,4 +119,17 @@ public extension CGRect {
         let newY = (cursor.y - offsetY).rounded()
         return CGRect(origin: CGPoint(x: newX, y: newY), size: savedSize)
     }
+
+    /// Returns true when `point` lies on or within `margin` points of this rect's perimeter.
+    /// Used to distinguish genuine manual edge/corner window resizes from transient size
+    /// changes in the window interior (such as macOS's `Ctrl+Cmd` hold-to-drag lift pulse).
+    func isPointNearEdge(_ point: CGPoint, margin: CGFloat = 16) -> Bool {
+        let outer = insetBy(dx: -margin, dy: -margin)
+        guard outer.contains(point) else { return false }
+        let inner = insetBy(dx: margin, dy: margin)
+        if inner.isNull || inner.width <= 0 || inner.height <= 0 {
+            return true
+        }
+        return !inner.contains(point)
+    }
 }
