@@ -57,25 +57,34 @@ Works passively with both standard titlebar dragging (`⌥` + drag) and macOS dr
 
 ## Build, Test & Install
 
-Requirements: macOS 13+, Swift 5.9+ (Xcode Command Line Tools), and a `Developer ID Application` signing identity for stable Accessibility permissions across rebuilds.
+Requirements: macOS 13+, Swift 5.9+ (Xcode Command Line Tools), and optionally a `Developer ID Application` signing identity for stable Accessibility permissions across rebuilds.
 
 ```bash
 # Run unit tests (pure Swift, ~10ms)
 swift test
 
-# Build Release (arm64), generate AppIcon.icns, sign, verify, and install to /Applications/Seamstress.app
+# Optional: configure your bundle ID and signing identity (gitignored)
+cp Config.example.xcconfig Local.xcconfig
+
+# Build Release for the host architecture, generate AppIcon.icns, sign, verify, and install to /Applications/Seamstress.app
 ./scripts/install.sh
 ```
 
-Override the signing identity if needed:
+`scripts/install.sh` reads `PRODUCT_BUNDLE_IDENTIFIER` and `CODE_SIGN_IDENTITY` from `Local.xcconfig` (falling back to `Config.example.xcconfig`). If no `CODE_SIGN_IDENTITY` is configured, it auto-detects an installed `Developer ID Application` certificate or falls back to ad-hoc signing (`-`). You can also override either value via environment variables:
 
 ```bash
-SEAMSTRESS_SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./scripts/install.sh
+SEAMSTRESS_BUNDLE_ID="com.yourname.seamstress" \
+SEAMSTRESS_SIGN_ID="Developer ID Application: Your Name (TEAMID)" \
+./scripts/install.sh
 ```
 
 On first launch, open `/Applications/Seamstress.app` and grant **Accessibility** permission in **System Settings → Privacy & Security → Accessibility**. Seamstress detects the grant automatically without needing a relaunch.
 
 ## Troubleshooting
 
-- **Seamstress does not respond to drags or seams:** Verify Accessibility is enabled for `/Applications/Seamstress.app` in System Settings. If you rebuilt with a different signing identity, remove and re-add Seamstress in Accessibility settings.
+- **Seamstress does not respond to drags or seams:** Verify Accessibility is enabled for `/Applications/Seamstress.app` in System Settings. If you rebuilt with a different signing identity (or ad-hoc signing), remove and re-add Seamstress in Accessibility settings.
 - **Launch from Finder / Spotlight / `open`:** Always launch `/Applications/Seamstress.app` via Launch Services (`/usr/bin/open /Applications/Seamstress.app`), not by running the raw binary directly from a terminal, so macOS attributes Accessibility trust to the app bundle.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

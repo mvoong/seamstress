@@ -17,7 +17,8 @@ Lightweight, mouse-driven macOS tiling window manager (`com.example.seamstress`,
 - `Tests/SeamstressCoreTests/`: Headless XCTest suite covering all core invariants.
 - `Resources/`: `Info.plist`, `Seamstress.entitlements`, and `generate-icon.swift`.
 - `assets/demo.svg`: Self-contained SMIL-animated SVG motion demo embedded in `README.md` (no JavaScript; renders natively in GitHub `<img>` tags).
-- `scripts/install.sh`: Builds host-arch (`arm64`) Release into `build/local-install/`, resolves the binary via `swift build --show-bin-path`, renders `AppIcon.icns`, signs with `Developer ID Application` (`SEAMSTRESS_SIGN_ID` override), verifies with `codesign --verify --deep --strict`, and installs to `/Applications/Seamstress.app`.
+- `Config.example.xcconfig` / `Local.xcconfig` (gitignored): Configures `PRODUCT_BUNDLE_IDENTIFIER` and `CODE_SIGN_IDENTITY` for local builds without committing personal bundle or signing identifiers.
+- `scripts/install.sh`: Builds host-arch (`$(uname -m)`) Release into `build/local-install/`, resolves the binary via `swift build --show-bin-path`, renders `AppIcon.icns`, stamps `CFBundleIdentifier` from `Local.xcconfig` (`SEAMSTRESS_BUNDLE_ID` override), signs with `CODE_SIGN_IDENTITY` (`SEAMSTRESS_SIGN_ID` override, auto-detecting `Developer ID Application` or falling back to ad-hoc `-`), verifies with `codesign --verify --deep --strict`, and installs to `/Applications/Seamstress.app`.
 
 ## Key Implementation Invariants
 

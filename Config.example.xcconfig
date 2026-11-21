@@ -1,0 +1,5 @@
+// Copy to Local.xcconfig (gitignored) and customize for local builds.
+// Used by scripts/install.sh to set the app bundle identifier and signing identity.
+
+PRODUCT_BUNDLE_IDENTIFIER = com.example.seamstress
+CODE_SIGN_IDENTITY = Developer ID Application: Your Name (TEAMID)
