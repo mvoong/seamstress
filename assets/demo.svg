@@ -1,0 +1,237 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 480" width="800" height="480" role="img" aria-label="Seamstress mouse-driven macOS tiling demonstration">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#131926"/>
+      <stop offset="55%" stop-color="#0e1420"/>
+      <stop offset="100%" stop-color="#151b2b"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.22" cy="0.28" r="0.55">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.82" cy="0.78" r="0.55">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="screenClip">
+      <rect x="16" y="12" width="768" height="420" rx="14"/>
+    </clipPath>
+    <filter id="winShadow" x="-12%" y="-12%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+    <filter id="seamGlow" x="-400%" y="-2%" width="900%" height="104%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Outer dark canvas for crisp contrast on both GitHub Light and Dark themes -->
+  <rect x="0" y="0" width="800" height="480" rx="18" fill="#090c14"/>
+
+  <!-- macOS Display Screen -->
+  <g clip-path="url(#screenClip)">
+    <rect x="16" y="12" width="768" height="420" fill="url(#bgGrad)"/>
+    <rect x="16" y="12" width="768" height="420" fill="url(#glowA)"/>
+    <rect x="16" y="12" width="768" height="420" fill="url(#glowB)"/>
+
+    <!-- Subtle macOS Menu Bar -->
+    <rect x="16" y="12" width="768" height="24" fill="#0b0f19" fill-opacity="0.82"/>
+    <line x1="16" y1="36" x2="784" y2="36" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+    <circle cx="32" cy="24" r="3.5" fill="#e2e8f0" fill-opacity="0.8"/>
+    <text x="46" y="28" fill="#e2e8f0" fill-opacity="0.85" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="11" font-weight="600">Seamstress</text>
+    <text x="120" y="28" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10.5">File</text>
+    <text x="150" y="28" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10.5">Edit</text>
+    <text x="182" y="28" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10.5">Window</text>
+    <!-- Menu bar Seamstress icon + clock -->
+    <g transform="translate(718 18)">
+      <rect x="0" y="0" width="14" height="11" rx="2.2" fill="none" stroke="#38bdf8" stroke-width="1.3"/>
+      <line x1="7" y1="0.5" x2="7" y2="10.5" stroke="#38bdf8" stroke-width="1.2"/>
+      <line x1="7" y1="5.5" x2="13.5" y2="5.5" stroke="#38bdf8" stroke-width="1.2"/>
+    </g>
+    <text x="742" y="28" fill="#cbd5e1" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="10.5" font-weight="500">9:41</text>
+
+    <!-- WINDOW 1: Editor -->
+    <svg x="64" y="78" width="330" height="240" overflow="hidden" filter="url(#winShadow)">
+      <animate attributeName="x" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0875;0.1437;0.1625;0.1844;0.5500;0.6125;0.6312;0.7000;0.9125;0.9688;1.0000" values="64;64;32;32;16;16;16;16;16;16;64;64" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="y" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0875;0.1437;0.1625;0.1844;0.5500;0.6125;0.6312;0.7000;0.9125;0.9688;1.0000" values="78;78;146;146;36;36;36;36;36;36;78;78" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="width" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0875;0.1437;0.1625;0.1844;0.5500;0.6125;0.6312;0.7000;0.9125;0.9688;1.0000" values="330;330;330;330;384;384;476;476;384;384;330;330" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="height" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0875;0.1437;0.1625;0.1844;0.5500;0.6125;0.6312;0.7000;0.9125;0.9688;1.0000" values="240;240;240;240;396;396;396;396;396;396;240;240" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <rect x="0" y="0" width="100%" height="100%" rx="8" fill="#161c2c"/>
+      <rect x="0" y="0" width="100%" height="27" rx="8" fill="#1d2538"/>
+      <rect x="0" y="14" width="100%" height="13" fill="#1d2538"/>
+      <line x1="0" y1="27" x2="100%" y2="27" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+      <circle cx="14" cy="14" r="3.8" fill="#ff5f56"/>
+      <circle cx="27" cy="14" r="3.8" fill="#ffbd2e"/>
+      <circle cx="40" cy="14" r="3.8" fill="#27c93f"/>
+      <text x="56" y="17.5" fill="#94a3b8" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10" font-weight="500">LayoutTree.swift</text>
+      <!-- Code skeleton -->
+      <rect x="18" y="44" width="62" height="6" rx="3" fill="#38bdf8" fill-opacity="0.55"/>
+      <rect x="88" y="44" width="94" height="6" rx="3" fill="#e2e8f0" fill-opacity="0.35"/>
+      <rect x="30" y="62" width="48" height="6" rx="3" fill="#a78bfa" fill-opacity="0.55"/>
+      <rect x="86" y="62" width="128" height="6" rx="3" fill="#94a3b8" fill-opacity="0.30"/>
+      <rect x="30" y="80" width="84" height="6" rx="3" fill="#38bdf8" fill-opacity="0.40"/>
+      <rect x="122" y="80" width="76" height="6" rx="3" fill="#34d399" fill-opacity="0.45"/>
+      <rect x="44" y="98" width="150" height="6" rx="3" fill="#94a3b8" fill-opacity="0.26"/>
+      <rect x="44" y="116" width="112" height="6" rx="3" fill="#fbbf24" fill-opacity="0.42"/>
+      <rect x="30" y="134" width="96" height="6" rx="3" fill="#94a3b8" fill-opacity="0.24"/>
+      <rect x="18" y="156" width="54" height="6" rx="3" fill="#38bdf8" fill-opacity="0.50"/>
+      <rect x="80" y="156" width="136" height="6" rx="3" fill="#e2e8f0" fill-opacity="0.28"/>
+      <rect x="30" y="174" width="164" height="6" rx="3" fill="#94a3b8" fill-opacity="0.22"/>
+      <rect x="30" y="192" width="108" height="6" rx="3" fill="#a78bfa" fill-opacity="0.42"/>
+      <rect x="18" y="214" width="70" height="6" rx="3" fill="#94a3b8" fill-opacity="0.20"/>
+      <rect x="0" y="0" width="100%" height="100%" rx="8" fill="none" stroke="#38bdf8" stroke-opacity="0.34" stroke-width="1.6"/>
+    </svg>
+
+    <!-- WINDOW 2: Terminal -->
+    <svg x="430" y="68" width="300" height="200" overflow="hidden" filter="url(#winShadow)">
+      <animate attributeName="x" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2313;0.2812;0.3000;0.3219;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7781;0.8031;0.9125;0.9688;1.0000" values="430;430;456;456;400;400;400;400;492;492;400;400;400;400;430;430" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="y" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2313;0.2812;0.3000;0.3219;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7781;0.8031;0.9125;0.9688;1.0000" values="68;68;148;148;36;36;36;36;36;36;36;36;36;36;68;68" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="width" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2313;0.2812;0.3000;0.3219;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7781;0.8031;0.9125;0.9688;1.0000" values="300;300;300;300;384;384;384;384;292;292;384;384;384;384;300;300" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="height" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2313;0.2812;0.3000;0.3219;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7781;0.8031;0.9125;0.9688;1.0000" values="200;200;200;200;396;396;198;198;198;198;198;198;396;396;200;200" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <rect x="0" y="0" width="100%" height="100%" rx="8" fill="#111722"/>
+      <rect x="0" y="0" width="100%" height="27" rx="8" fill="#171f2e"/>
+      <rect x="0" y="14" width="100%" height="13" fill="#171f2e"/>
+      <line x1="0" y1="27" x2="100%" y2="27" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+      <circle cx="14" cy="14" r="3.8" fill="#ff5f56"/>
+      <circle cx="27" cy="14" r="3.8" fill="#ffbd2e"/>
+      <circle cx="40" cy="14" r="3.8" fill="#27c93f"/>
+      <text x="56" y="17.5" fill="#94a3b8" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10" font-weight="500">zsh — swift test</text>
+      <!-- Terminal skeleton -->
+      <rect x="16" y="44" width="24" height="6" rx="3" fill="#34d399" fill-opacity="0.7"/>
+      <rect x="48" y="44" width="110" height="6" rx="3" fill="#e2e8f0" fill-opacity="0.38"/>
+      <rect x="16" y="64" width="176" height="5.5" rx="2.75" fill="#94a3b8" fill-opacity="0.26"/>
+      <rect x="16" y="80" width="142" height="5.5" rx="2.75" fill="#94a3b8" fill-opacity="0.22"/>
+      <rect x="16" y="96" width="160" height="5.5" rx="2.75" fill="#34d399" fill-opacity="0.45"/>
+      <rect x="16" y="116" width="24" height="6" rx="3" fill="#34d399" fill-opacity="0.7"/>
+      <rect x="48" y="116" width="84" height="6" rx="3" fill="#38bdf8" fill-opacity="0.42"/>
+      <rect x="16" y="136" width="128" height="5.5" rx="2.75" fill="#94a3b8" fill-opacity="0.22"/>
+      <rect x="16" y="152" width="154" height="5.5" rx="2.75" fill="#94a3b8" fill-opacity="0.18"/>
+      <rect x="0" y="0" width="100%" height="100%" rx="8" fill="none" stroke="#34d399" stroke-opacity="0.32" stroke-width="1.6"/>
+    </svg>
+
+    <!-- WINDOW 3: Browser / Preview -->
+    <svg x="240" y="178" width="320" height="210" overflow="hidden" filter="url(#winShadow)">
+      <animate attributeName="x" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.3750;0.4313;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7656;0.8281;1.0000" values="240;240;420;420;400;400;492;492;400;400;240;240" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="y" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.3750;0.4313;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7656;0.8281;1.0000" values="178;178;250;250;234;234;234;234;234;234;178;178" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="width" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.3750;0.4313;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7656;0.8281;1.0000" values="320;320;320;320;384;384;292;292;384;384;320;320" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="height" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.3750;0.4313;0.4500;0.4719;0.5500;0.6125;0.6312;0.7000;0.7656;0.8281;1.0000" values="210;210;210;210;198;198;198;198;198;198;210;210" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <rect x="0" y="0" width="100%" height="100%" rx="8" fill="#18192b"/>
+      <rect x="0" y="0" width="100%" height="27" rx="8" fill="#21223a"/>
+      <rect x="0" y="14" width="100%" height="13" fill="#21223a"/>
+      <line x1="0" y1="27" x2="100%" y2="27" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+      <circle cx="14" cy="14" r="3.8" fill="#ff5f56"/>
+      <circle cx="27" cy="14" r="3.8" fill="#ffbd2e"/>
+      <circle cx="40" cy="14" r="3.8" fill="#27c93f"/>
+      <rect x="58" y="7.5" width="120" height="13" rx="6.5" fill="#0f1120" fill-opacity="0.65"/>
+      <text x="70" y="17" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="9.5">Docs &amp; Preview</text>
+      <!-- Card UI skeleton -->
+      <rect x="18" y="42" width="110" height="9" rx="4.5" fill="#e2e8f0" fill-opacity="0.36"/>
+      <rect x="18" y="60" width="196" height="5.5" rx="2.75" fill="#94a3b8" fill-opacity="0.24"/>
+      <rect x="18" y="78" width="112" height="56" rx="6" fill="#818cf8" fill-opacity="0.16" stroke="#818cf8" stroke-opacity="0.28" stroke-width="1"/>
+      <rect x="142" y="78" width="112" height="56" rx="6" fill="#38bdf8" fill-opacity="0.14" stroke="#38bdf8" stroke-opacity="0.25" stroke-width="1"/>
+      <rect x="18" y="148" width="168" height="5.5" rx="2.75" fill="#94a3b8" fill-opacity="0.22"/>
+      <rect x="18" y="164" width="132" height="5.5" rx="2.75" fill="#94a3b8" fill-opacity="0.18"/>
+      <rect x="0" y="0" width="100%" height="100%" rx="8" fill="none" stroke="#a78bfa" stroke-opacity="0.34" stroke-width="1.6"/>
+    </svg>
+
+    <!-- Frosted-glass Drop Preview Overlay -->
+    <rect x="20" y="40" width="376" height="388" rx="10"
+          fill="#38bdf8" fill-opacity="0.18" stroke="#38bdf8" stroke-opacity="0.90" stroke-width="2" opacity="0">
+      <animate attributeName="x" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2125;0.2188;0.3563;0.3625;1.0000" values="20;20;404;404;404;404" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="y" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2125;0.2188;0.3563;0.3625;1.0000" values="40;40;40;40;238;238" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="width" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2125;0.2188;0.3563;0.3625;1.0000" values="376;376;376;376;376;376" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="height" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2125;0.2188;0.3563;0.3625;1.0000" values="388;388;388;388;190;190" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.1094;0.1156;0.1594;0.1656;0.2469;0.2531;0.2969;0.3031;0.3969;0.4031;0.4469;0.4531;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0;1.0;1.0;0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </rect>
+
+    <!-- Live Flush Seam Highlight + Centered Grip Pill -->
+    <g opacity="0">
+      <animateTransform attributeName="transform" type="translate" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.5500;0.6125;0.6312;0.7000;1.0000" values="400 0;400 0;492 0;492 0;400 0;400 0" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.5194;0.5281;0.7156;0.7244;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+      <line x1="0" y1="36" x2="0" y2="432" stroke="#57ccff" stroke-width="2.5" filter="url(#seamGlow)"/>
+      <rect x="-3.5" y="212" width="7" height="44" rx="3.5" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.2"/>
+    </g>
+
+    <!-- Animated Cursor + Option Keycap Badge -->
+    <g>
+      <animateTransform attributeName="transform" type="translate" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0875;0.1437;0.1750;0.2188;0.2313;0.2812;0.3125;0.3625;0.3750;0.4313;0.4625;0.5188;0.5500;0.6125;0.6312;0.7000;0.7188;0.7562;0.7656;0.8281;0.9125;0.9688;1.0000" values="210 91;210 91;96 160;96 160;560 81;560 81;586 162;586 162;400 191;400 191;580 345;580 345;400 234;400 234;492 234;492 234;400 234;400 234;560 247;560 247;400 191;400 191;210 91;210 91" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1"/>
+      <!-- Standard macOS pointer -->
+      <g opacity="1">
+        <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.5219;0.5256;0.7181;0.7219;1.0000" values="1.0;1.0;0.0;0.0;1.0;1.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+        <path d="M0,0 L0,18 L4.4,14.2 L7.6,21 L10.2,19.8 L7,13 L12.5,13 Z"
+              fill="#ffffff" stroke="#090c14" stroke-width="1.4" stroke-linejoin="round"/>
+      </g>
+      <!-- Horizontal seam resize cursor (↔) -->
+      <g opacity="0">
+        <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.5225;0.5262;0.7175;0.7213;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+        <circle cx="0" cy="0" r="11" fill="#0f172a" fill-opacity="0.88" stroke="#38bdf8" stroke-width="1.2"/>
+        <path d="M-7,0 L-3,-3.5 L-3,-1.2 L3,-1.2 L3,-3.5 L7,0 L3,3.5 L3,1.2 L-3,1.2 L-3,3.5 Z" fill="#f8fafc"/>
+      </g>
+      <!-- Option keycap badge (⌥) -->
+      <g transform="translate(15 -6)" opacity="0">
+        <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0731;0.0781;0.1613;0.1663;0.2169;0.2219;0.2988;0.3038;0.3606;0.3656;0.4487;0.4537;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0;1.0;1.0;0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+        <rect x="0" y="0" width="24" height="22" rx="6" fill="#0f172a" fill-opacity="0.94" stroke="#38bdf8" stroke-width="1.4"/>
+        <text x="12" y="15" text-anchor="middle" fill="#7dd3fc" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" font-size="12.5" font-weight="600">⌥</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Crisp Display Bezel Border -->
+  <rect x="16" y="12" width="768" height="420" rx="14" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1.2"/>
+
+  <!-- Bottom Caption Bar -->
+  <g>
+    <text x="400" y="462" text-anchor="middle" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="13" font-weight="500" letter-spacing="0.1" opacity="0">Floating by default — windows stay where you put them
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0719;0.0806;1.0000" values="1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </text>
+    <text x="400" y="462" text-anchor="middle" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="13" font-weight="500" letter-spacing="0.1" opacity="0">⌥ + Drag to edge — snap 50% left
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0694;0.0781;0.2094;0.2181;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </text>
+    <text x="400" y="462" text-anchor="middle" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="13" font-weight="500" letter-spacing="0.1" opacity="0">⌥ + Drag into empty slot — fill remaining half
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2069;0.2156;0.3531;0.3619;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </text>
+    <text x="400" y="462" text-anchor="middle" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="13" font-weight="500" letter-spacing="0.1" opacity="0">⌥ + Drag onto pane edge — split 50/50
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.3506;0.3594;0.5094;0.5181;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </text>
+    <text x="400" y="462" text-anchor="middle" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="13" font-weight="500" letter-spacing="0.1" opacity="0">Drag flush seam — resize all panes in real time
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.5069;0.5156;0.7469;0.7556;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </text>
+    <text x="400" y="462" text-anchor="middle" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="13" font-weight="500" letter-spacing="0.1" opacity="0">Normal drag — detach to float &amp; auto-collapse
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.7444;0.7531;0.9094;0.9181;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </text>
+    <text x="400" y="462" text-anchor="middle" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="13" font-weight="500" letter-spacing="0.1" opacity="0">Floating by default — windows stay where you put them
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.9131;0.9219;1.0000" values="0.0;0.0;1.0;1.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </text>
+  </g>
+
+  <!-- Step Progress Dots -->
+  <g>
+    <circle cx="708" cy="458" r="2.6" fill="#334155"/>
+    <circle cx="708" cy="458" r="2.6" fill="#38bdf8" opacity="0">
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0750;0.0813;1.0000" values="1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </circle>
+    <circle cx="720" cy="458" r="2.6" fill="#334155"/>
+    <circle cx="720" cy="458" r="2.6" fill="#38bdf8" opacity="0">
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.0687;0.0750;0.2125;0.2188;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </circle>
+    <circle cx="732" cy="458" r="2.6" fill="#334155"/>
+    <circle cx="732" cy="458" r="2.6" fill="#38bdf8" opacity="0">
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.2062;0.2125;0.3563;0.3625;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </circle>
+    <circle cx="744" cy="458" r="2.6" fill="#334155"/>
+    <circle cx="744" cy="458" r="2.6" fill="#38bdf8" opacity="0">
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.3500;0.3563;0.5125;0.5187;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </circle>
+    <circle cx="756" cy="458" r="2.6" fill="#334155"/>
+    <circle cx="756" cy="458" r="2.6" fill="#38bdf8" opacity="0">
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.5062;0.5125;0.7500;0.7562;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </circle>
+    <circle cx="768" cy="458" r="2.6" fill="#334155"/>
+    <circle cx="768" cy="458" r="2.6" fill="#38bdf8" opacity="0">
+      <animate attributeName="opacity" dur="16.0s" repeatCount="indefinite" calcMode="spline" keyTimes="0.0000;0.7438;0.7500;0.9125;0.9187;1.0000" values="0.0;0.0;1.0;1.0;0.0;0.0" keySplines="0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1;0 0 1 1"/>
+    </circle>
+  </g>
+</svg>

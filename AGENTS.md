@@ -16,6 +16,7 @@ Lightweight, mouse-driven macOS tiling window manager (`com.example.seamstress`,
 - `Sources/Seamstress/`: macOS menu bar runtime (`InputEventTap`, `AXWindowBridge`, `SkyLightBridge`, `DisplayObserver`, `WindowEventMonitor`, `DropPreviewOverlay`, `SeamHighlightOverlay`, `WindowManager`, `MenuBarPopoverView`, `AppDelegate`, `main`). Supports custom template menu bar icon (Option-click/right-click pause toggle), hiding the menu bar icon (`seamstress.showMenuBarIcon` in `UserDefaults`; reopening presents a standalone controls window), frosted-glass drop preview with action badges, centered `┼` intersection knob, Force Touch haptics, `Esc` drag undo while holding mouse down (synthetic `leftMouseUp` termination for native window drags + seam ratio restore), and interactive app-icon minimap with Equalize/Clear actions.
 - `Tests/SeamstressCoreTests/`: Headless XCTest suite covering all core invariants.
 - `Resources/`: `Info.plist`, `Seamstress.entitlements`, and `generate-icon.swift`.
+- `assets/demo.svg`: Self-contained SMIL-animated SVG motion demo embedded in `README.md` (no JavaScript; renders natively in GitHub `<img>` tags).
 - `scripts/install.sh`: Builds host-arch (`arm64`) Release into `build/local-install/`, resolves the binary via `swift build --show-bin-path`, renders `AppIcon.icns`, signs with `Developer ID Application` (`SEAMSTRESS_SIGN_ID` override), verifies with `codesign --verify --deep --strict`, and installs to `/Applications/Seamstress.app`.
 
 ## Key Implementation Invariants

@@ -2,6 +2,8 @@
 
 A lightweight, mouse-driven macOS tiling window manager built around floating-by-default windows, Option-drag splitting, and real-time flush seam resizing.
 
+![Seamstress tiling demo](assets/demo.svg)
+
 ## Design Philosophy
 
 - **Unmanaged by default:** New windows open wherever macOS places them. Seamstress never hijacks or rearranges windows until you explicitly tile them.
