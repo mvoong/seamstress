@@ -245,7 +245,7 @@ struct MenuBarPopoverView: View {
             row("⌥ / ⌃⌘ Drag", "Fill, split pane, T-junction, or swap center")
             row("Normal Drag", "Detach to floating & expand neighbors")
             row("Hover Seam", "Drag to resize (⇧ free) · 2× click 50%")
-            row("Esc", "Cancel active snap drag or seam resize")
+            row("Esc", "Undo active window drag or seam resize")
         }
         .font(.caption)
     }

@@ -54,13 +54,16 @@ final class InputEventTap {
     private var lastHoverNotifyPoint: CGPoint = .zero
     private var lastCursorReassertUptime: TimeInterval = 0
 
+    private static let syntheticCancelTag: Int64 = 0x5345_414D_4341_4E43
+
     private var activeSeamDrag: SeamHit?
     private var swallowingDoubleClickUp = false
     private var swallowingCancelledSeamDrag = false
+    private var swallowingCancelledWindowDrag = false
     private var isLeftMouseDown = false
     private var lastSnapModifierDown = false
     private var lastShiftDownDuringSeamDrag = false
-    private var hasActiveWindowDragPreview = false
+    private var hasActiveWindowMove = false
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -104,11 +107,11 @@ final class InputEventTap {
         lock.unlock()
     }
 
-    /// Called from main thread to inform the tap whether an `⌥`/`⌃⌘` snap-drag preview is active
-    /// so pressing Escape can cancel and swallow the key event.
-    func setHasActiveWindowDragPreview(_ active: Bool) {
+    /// Called from main thread to inform the tap whether a confirmed window drag is in progress
+    /// so pressing Escape while holding the mouse button down can undo it immediately.
+    func setHasActiveWindowMove(_ active: Bool) {
         lock.lock()
-        hasActiveWindowDragPreview = active
+        hasActiveWindowMove = active
         lock.unlock()
     }
 
@@ -181,10 +184,11 @@ final class InputEventTap {
         activeSeamDrag = nil
         swallowingDoubleClickUp = false
         swallowingCancelledSeamDrag = false
+        swallowingCancelledWindowDrag = false
         isLeftMouseDown = false
         lastSnapModifierDown = false
         lastShiftDownDuringSeamDrag = false
-        hasActiveWindowDragPreview = false
+        hasActiveWindowMove = false
         unoccludedHit = nil
         lastHoverIdentity = nil
         lastCursorReassertUptime = 0
@@ -225,6 +229,10 @@ final class InputEventTap {
 
     /// Runs on the dedicated EventTap thread. Must return in microseconds.
     fileprivate func handle(type: CGEventType, event: CGEvent) -> CGEvent? {
+        if event.getIntegerValueField(.eventSourceUserData) == Self.syntheticCancelTag {
+            return event
+        }
+
         // Fast path for normal typing: pass non-Escape keyDown events straight through
         // without acquiring the lock or hopping to main.
         if type == .keyDown {
@@ -242,9 +250,24 @@ final class InputEventTap {
                 }
                 return nil
             }
-            if isLeftMouseDown && hasActiveWindowDragPreview {
-                hasActiveWindowDragPreview = false
+            if isLeftMouseDown && hasActiveWindowMove {
+                hasActiveWindowMove = false
+                swallowingCancelledWindowDrag = true
                 lock.unlock()
+
+                // Terminate macOS's native window-drag loop immediately so the window
+                // snaps back to its pre-drag frame while the user still holds the mouse button.
+                let cursorPoint = event.location
+                if let syntheticUp = CGEvent(
+                    mouseEventSource: nil,
+                    mouseType: .leftMouseUp,
+                    mouseCursorPosition: cursorPoint,
+                    mouseButton: .left
+                ) {
+                    syntheticUp.setIntegerValueField(.eventSourceUserData, value: Self.syntheticCancelTag)
+                    syntheticUp.post(tap: .cgSessionEventTap)
+                }
+
                 DispatchQueue.main.async { [weak self] in
                     self?.onWindowDragCancel?()
                 }
@@ -327,6 +350,7 @@ final class InputEventTap {
 
             lock.lock()
             swallowingCancelledSeamDrag = false
+            swallowingCancelledWindowDrag = false
             if let hit = grabbed {
                 unoccludedHit = hit
                 isLeftMouseDown = true
@@ -386,7 +410,7 @@ final class InputEventTap {
         case .leftMouseDragged:
             let shiftDown = event.flags.contains(.maskShift)
             lock.lock()
-            if swallowingDoubleClickUp || swallowingCancelledSeamDrag {
+            if swallowingDoubleClickUp || swallowingCancelledSeamDrag || swallowingCancelledWindowDrag {
                 lock.unlock()
                 return nil
             }
@@ -409,10 +433,11 @@ final class InputEventTap {
         case .leftMouseUp:
             lock.lock()
             isLeftMouseDown = false
-            hasActiveWindowDragPreview = false
-            if swallowingDoubleClickUp || swallowingCancelledSeamDrag {
+            hasActiveWindowMove = false
+            if swallowingDoubleClickUp || swallowingCancelledSeamDrag || swallowingCancelledWindowDrag {
                 swallowingDoubleClickUp = false
                 swallowingCancelledSeamDrag = false
+                swallowingCancelledWindowDrag = false
                 lock.unlock()
                 return nil
             }
@@ -439,7 +464,7 @@ final class InputEventTap {
             if notifySeamShift {
                 lastShiftDownDuringSeamDrag = shiftDown
             }
-            let notifyWindowSnap = !notifySeamShift && isLeftMouseDown && activeSeamDrag == nil && !swallowingCancelledSeamDrag && snapModifierDown != lastSnapModifierDown
+            let notifyWindowSnap = !notifySeamShift && isLeftMouseDown && activeSeamDrag == nil && !swallowingCancelledSeamDrag && !swallowingCancelledWindowDrag && snapModifierDown != lastSnapModifierDown
             if notifyWindowSnap {
                 lastSnapModifierDown = snapModifierDown
             }

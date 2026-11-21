@@ -27,7 +27,7 @@ A lightweight, mouse-driven macOS tiling window manager built around floating-by
 | **Drag Seam / `┼` Intersection** | Resizes all affected windows in real time (1-axis along a seam, or simultaneous 2-axis at a vertical+horizontal intersection), with magnetic detents at 50% / ⅓ / ⅔ and neighboring co-linear seams (hold `⇧` for free positioning), amber clamping cues + Force Touch haptics at real window minimum sizes. |
 | **Drag Seam > 90%** toward an empty slot | Previews and collapses the empty slot on release, expanding the occupied side to 100%. |
 | **Double-click Seam** | Collapses an adjacent empty slot, or resets a split between two occupied panes to 50/50. |
-| **`Esc` during snap drag or seam resize** | Cancels cleanly and restores the window or split ratios to their pre-drag state without detaching. |
+| **`Esc` while dragging a window or seam** | Undoes the current drag immediately while holding the mouse button down, restoring floating windows, tiled layouts, or split ratios to their pre-drag state. |
 | **Option-click / Right-click Menu Bar Icon** | Quickly toggles Seamstress between Active and Paused. |
 | **Menu Bar Minimap** | Shows live per-display app icons (click a tile to focus), **Equalize** (reset all splits to 50/50), and **Clear**. |
 

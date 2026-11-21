@@ -41,7 +41,6 @@ final class WindowManager: ObservableObject {
         var currentPlan: DropPlan?
         var detachUndo: DetachUndoSnapshot?
         var detachedAt: TimeInterval?
-        var cancelledRestoreFrames: [WindowID: CGRect]?
     }
 
     private struct SeamDragSession {
@@ -114,7 +113,7 @@ final class WindowManager: ObservableObject {
         adoptionRetryCount = 0
 
         persistSavedFloatingFrames()
-        inputTap.setHasActiveWindowDragPreview(false)
+        inputTap.setHasActiveWindowMove(false)
         inputTap.stop()
         eventMonitor.stop()
         displayObserver.stopObserving()
@@ -167,7 +166,7 @@ final class WindowManager: ObservableObject {
         displayObserver.onDisplaysOrSpacesChanged = { [weak self] topologyChanged in
             guard let self, self.isRunning else { return }
             self.dropOverlay.hide()
-            self.inputTap.setHasActiveWindowDragPreview(false)
+            self.inputTap.setHasActiveWindowMove(false)
             self.seamOverlay.hide()
             self.windowDrag = nil
             self.seamDrag = nil
@@ -185,7 +184,7 @@ final class WindowManager: ObservableObject {
             guard let self, self.isRunning else { return }
             if !isActive {
                 self.dropOverlay.hide()
-                self.inputTap.setHasActiveWindowDragPreview(false)
+                self.inputTap.setHasActiveWindowMove(false)
                 self.seamOverlay.hide()
                 self.windowDrag = nil
                 self.seamDrag = nil
@@ -685,7 +684,7 @@ final class WindowManager: ObservableObject {
         guard isRunning else { return }
         seamOverlay.hide()
         dropOverlay.hide()
-        inputTap.setHasActiveWindowDragPreview(false)
+        inputTap.setHasActiveWindowMove(false)
 
         guard let top = axBridge.topWindow(at: point) else {
             windowDrag = nil
@@ -750,6 +749,7 @@ final class WindowManager: ObservableObject {
 
             axBridge.register(windowID: session.window.windowID, pid: session.window.ownerPID)
             session.phase = .moving
+            inputTap.setHasActiveWindowMove(true)
 
             // Dragging a tiled window WITHOUT a snap modifier detaches it immediately and expands neighbors,
             // while keeping a short undo snapshot in case Option or Ctrl+Cmd is pressed right after starting.
@@ -777,16 +777,13 @@ final class WindowManager: ObservableObject {
                     kind: plan.previewKind,
                     primaryScreenHeight: displayObserver.primaryScreenHeight
                 )
-                inputTap.setHasActiveWindowDragPreview(true)
             } else {
                 dropOverlay.hide(animated: true)
-                inputTap.setHasActiveWindowDragPreview(false)
             }
         } else {
             session.currentPlan = nil
             windowDrag = session
             dropOverlay.hide(animated: true)
-            inputTap.setHasActiveWindowDragPreview(false)
         }
     }
 
@@ -820,16 +817,13 @@ final class WindowManager: ObservableObject {
                     kind: plan.previewKind,
                     primaryScreenHeight: displayObserver.primaryScreenHeight
                 )
-                inputTap.setHasActiveWindowDragPreview(true)
             } else {
                 dropOverlay.hide(animated: true)
-                inputTap.setHasActiveWindowDragPreview(false)
             }
         } else {
             session.currentPlan = nil
             windowDrag = session
             dropOverlay.hide(animated: true)
-            inputTap.setHasActiveWindowDragPreview(false)
 
             // If user started dragging a tiled window with a snap modifier held and then released it
             // mid-drag, detach it to floating right away.
@@ -847,56 +841,43 @@ final class WindowManager: ObservableObject {
     }
 
     private func handleWindowDragCancel() {
-        guard var session = windowDrag else { return }
+        guard let session = windowDrag else { return }
+        windowDrag = nil
         dropOverlay.hide(animated: true)
-        inputTap.setHasActiveWindowDragPreview(false)
-        session.currentPlan = nil
-        session.phase = .ignored
+        inputTap.setHasActiveWindowMove(false)
 
         var framesToRestore: [WindowID: CGRect] = [:]
         if let undo = session.detachUndo {
-            session.detachUndo = nil
-            session.detachedAt = nil
-            if store.restoreDetachSnapshot(undo),
-               let bounds = displayObserver.usableBounds(for: undo.spaceKey) {
-                framesToRestore = store.frames(for: undo.spaceKey, screenBounds: bounds)
+            if store.restoreDetachSnapshot(undo) {
+                persistSavedFloatingFrames()
+                if let bounds = displayObserver.usableBounds(for: undo.spaceKey) {
+                    framesToRestore = store.frames(for: undo.spaceKey, screenBounds: bounds)
+                }
             }
         } else if let space = store.spaceKey(for: session.window.windowID),
                   let bounds = displayObserver.usableBounds(for: space),
                   let rect = store.frames(for: space, screenBounds: bounds)[session.window.windowID] {
             framesToRestore = [session.window.windowID: rect]
+        } else {
+            framesToRestore = [session.window.windowID: session.preDragFrame]
         }
+
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
 
         if !framesToRestore.isEmpty {
-            session.cancelledRestoreFrames = framesToRestore
-            axBridge.applyFrames(framesToRestore, crossMonitorSafe: true)
-        }
-
-        windowDrag = session
-        refreshSeamsAndUI()
-    }
-
-    private func handleWindowMouseUp(at point: CGPoint, snapModifierDown: Bool) {
-        dropOverlay.hide(animated: true)
-        inputTap.setHasActiveWindowDragPreview(false)
-        guard let session = windowDrag else { return }
-        windowDrag = nil
-
-        if let restoreFrames = session.cancelledRestoreFrames {
-            // Re-apply after macOS finishes native mouse-up tracking so an Esc-cancelled drag
-            // snaps cleanly back to its pre-drag tile even if the pointer moved before release.
-            axBridge.applyFrames(restoreFrames, crossMonitorSafe: true) { [weak self] in
+            let expected = framesToRestore
+            axBridge.applyFrames(expected, crossMonitorSafe: true) { [weak self] in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in
-                    guard let self, self.isRunning, self.windowDrag == nil else { return }
+                    guard let self, self.isRunning, self.windowDrag == nil, self.seamDrag == nil else { return }
                     var drifted: [WindowID: CGRect] = [:]
-                    for (wid, expected) in restoreFrames where self.store.isTiled(wid) {
+                    for (wid, target) in expected {
                         if let actual = self.axBridge.windowBounds(windowID: wid) {
-                            let drift = abs(actual.origin.x - expected.origin.x)
-                                + abs(actual.origin.y - expected.origin.y)
-                                + abs(actual.width - expected.width)
-                                + abs(actual.height - expected.height)
+                            let drift = abs(actual.origin.x - target.origin.x)
+                                + abs(actual.origin.y - target.origin.y)
+                                + abs(actual.width - target.width)
+                                + abs(actual.height - target.height)
                             if drift > 3 {
-                                drifted[wid] = expected
+                                drifted[wid] = target
                             }
                         }
                     }
@@ -905,8 +886,16 @@ final class WindowManager: ObservableObject {
                     }
                 }
             }
-            return
         }
+
+        refreshSeamsAndUI()
+    }
+
+    private func handleWindowMouseUp(at point: CGPoint, snapModifierDown: Bool) {
+        dropOverlay.hide(animated: true)
+        inputTap.setHasActiveWindowMove(false)
+        guard let session = windowDrag else { return }
+        windowDrag = nil
 
         guard session.phase == .moving, snapModifierDown else { return }
 
