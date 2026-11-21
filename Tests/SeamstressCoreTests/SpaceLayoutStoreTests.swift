@@ -242,4 +242,32 @@ final class SpaceLayoutStoreTests: XCTestCase {
         XCTAssertEqual(restoredFrames, framesBefore)
         XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA), framesBefore)
     }
+
+    func testCollapseImpossibleEmptySplitsRemovesPhantomInnerSeamAfterMinSizeLearned() {
+        let store = SpaceLayoutStore()
+        let laptop = CGRect(x: 0, y: 0, width: 1512, height: 950)
+        let laptopBounds: (SpaceKey) -> CGRect? = { $0 == self.spaceA ? laptop : nil }
+
+        // Put window 1 on left half, window 2 on right half, then shrink window 1 to left quarter
+        // BEFORE its minimum size is known (simulating an app with undisclosed min width).
+        let p1 = store.planDrop(pointer: CGPoint(x: 756, y: 475), draggedWindowID: 1, targetSpace: spaceA, screenBounds: laptop)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: laptopBounds)
+        let p2 = store.planDrop(pointer: CGPoint(x: 1450, y: 475), draggedWindowID: 2, targetSpace: spaceA, screenBounds: laptop)!
+        _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: laptopBounds)
+        let pShrink = store.planDrop(pointer: CGPoint(x: 20, y: 475), draggedWindowID: 1, targetSpace: spaceA, screenBounds: laptop)!
+        _ = store.commitDrop(pShrink, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: laptopBounds)
+
+        // Before learning min size, there are 2 vertical seams (outer 50% + inner 25%).
+        XCTAssertEqual(store.visibleSeams(for: [(spaceA, laptop)]).count, 2)
+
+        // Learn settled min width of 760px for window 1 and reconcile impossible empty splits.
+        store.recordMinimumSize(CGSize(width: 760, height: 512), for: 1)
+        let updated = store.collapseImpossibleEmptySplits(in: spaceA, screenBounds: laptop)
+        XCTAssertNotNil(updated)
+
+        // Phantom inner seam is gone; only the outer 50% seam remains and window 1 fills the left half.
+        XCTAssertEqual(store.visibleSeams(for: [(spaceA, laptop)]).count, 1)
+        XCTAssertEqual(updated?[1]?.width, 756)
+        XCTAssertEqual(updated?[2]?.width, 756)
+    }
 }

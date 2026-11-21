@@ -234,4 +234,69 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(plan?.previewKind, .splitContainer)
         XCTAssertEqual(plan?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
     }
+
+    func testMinSizePreventsImpossibleQuarterShrinkAndClampsHalfSplitRatio() {
+        let laptop = CGRect(x: 0, y: 0, width: 1512, height: 950)
+        // Window 10 has min width 760 (larger than half of 1512 = 756, and far larger than a 378px quarter)
+        let minSizes: [WindowID: CGSize] = [10: CGSize(width: 760, height: 512), 20: CGSize(width: 336, height: 208)]
+
+        // 1. Snapping window 10 to left edge of full 1512px empty screen succeeds with clamped ratio >= 760/1512
+        let emptyTree = LayoutTree()
+        let leftHalf = DropPlanner.plan(
+            pointer: CGPoint(x: 30, y: 475),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: emptyTree,
+            screenBounds: laptop,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(leftHalf?.action, .splitEmpty(leafID: emptyTree.root.id, edge: .left))
+        XCTAssertGreaterThanOrEqual(leftHalf?.previewRect.width ?? 0, 760)
+        XCTAssertGreaterThan(leftHalf?.splitRatio ?? 0, 0.5)
+
+        // 2. Once window 10 occupies the 766px left half next to window 20, dragging 10 to its own left edge
+        //    cannot shrink it into a quarter (760 + 140 > 766) -> falls back to keepInPlace.
+        var splitTree = LayoutTree()
+        splitTree.fillEmpty(leafID: splitTree.root.id, with: 10)
+        splitTree.splitOccupied(leafID: splitTree.leafID(for: 10)!, edge: .right, ratio: 766.0 / 1512.0, with: 20)
+        let leaf10 = splitTree.leafID(for: 10)!
+
+        let shrinkAttempt = DropPlanner.plan(
+            pointer: CGPoint(x: 20, y: 475),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: splitTree,
+            screenBounds: laptop,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(shrinkAttempt?.action, .keepInPlace(leafID: leaf10))
+        XCTAssertEqual(shrinkAttempt?.previewKind, .fill)
+
+        // 3. Dragging a third window (min width 300) onto the left edge of 10's 766px slot cannot split
+        //    horizontally (760 + 300 > 766) -> falls back to replace instead of creating an overflowing split.
+        let minSizesWith30 = minSizes.merging([30: CGSize(width: 300, height: 200)]) { _, new in new }
+        let horizontalSplitAttempt = DropPlanner.plan(
+            pointer: CGPoint(x: 20, y: 475),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: splitTree,
+            screenBounds: laptop,
+            minSizes: minSizesWith30
+        )
+        XCTAssertEqual(horizontalSplitAttempt?.action, .swapOrReplace(leafID: leaf10, targetWindowID: 10))
+        XCTAssertEqual(horizontalSplitAttempt?.previewKind, .replace)
+
+        // 4. Vertical (top/bottom) split of 10's 766x950 slot still fits (512 + 200 <= 950) with clamped ratio.
+        let verticalSplitAttempt = DropPlanner.plan(
+            pointer: CGPoint(x: 380, y: 30),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: splitTree,
+            screenBounds: laptop,
+            minSizes: minSizesWith30
+        )
+        XCTAssertEqual(verticalSplitAttempt?.action, .splitOccupied(leafID: leaf10, edge: .top))
+        XCTAssertEqual(verticalSplitAttempt?.previewKind, .split)
+        XCTAssertLessThanOrEqual(verticalSplitAttempt?.previewRect.height ?? 999, 950 - 512 + 1)
+    }
 }

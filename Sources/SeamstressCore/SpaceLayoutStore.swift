@@ -119,7 +119,8 @@ public final class SpaceLayoutStore {
             targetSpace: targetSpace,
             tree: targetTree,
             screenBounds: screenBounds,
-            isDraggedWindowTiled: windowToSpace[draggedWindowID] != nil
+            isDraggedWindowTiled: windowToSpace[draggedWindowID] != nil,
+            minSizes: learnedMinSizes
         )
     }
 
@@ -154,7 +155,7 @@ public final class SpaceLayoutStore {
 
         case .shrinkOwnSlot(let leafID, let edge):
             var t = tree(for: targetSpace)
-            t.shrinkToEdge(leafID: leafID, edge: edge)
+            t.shrinkToEdge(leafID: leafID, edge: edge, ratio: plan.splitRatio)
             store(t, for: targetSpace)
 
         case .fillEmpty(let leafID):
@@ -164,17 +165,17 @@ public final class SpaceLayoutStore {
 
         case .splitEmpty(let leafID, let edge):
             moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: false) { t in
-                t.splitEmpty(leafID: leafID, edge: edge, with: draggedWindowID)
+                t.splitEmpty(leafID: leafID, edge: edge, ratio: plan.splitRatio, with: draggedWindowID)
             }
 
         case .splitOccupied(let leafID, let edge):
             moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: true) { t in
-                t.splitOccupied(leafID: leafID, edge: edge, with: draggedWindowID)
+                t.splitOccupied(leafID: leafID, edge: edge, ratio: plan.splitRatio, with: draggedWindowID)
             }
 
         case .splitNode(let nodeID, let edge):
             moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: true) { t in
-                t.splitNode(nodeID: nodeID, edge: edge, with: draggedWindowID)
+                t.splitNode(nodeID: nodeID, edge: edge, ratio: plan.splitRatio, with: draggedWindowID)
             }
 
         case .swapOrReplace(let targetLeafID, let targetWindowID):
@@ -385,6 +386,43 @@ public final class SpaceLayoutStore {
         }
         store(t, for: spaceKey)
         return t.windowFrames(in: screenBounds)
+    }
+
+    /// Collapse any split in `spaceKey` where one side is empty and the occupied side's
+    /// minimum extent leaves less than 48pt for the empty side (so no dead phantom seam sits
+    /// inside an overflowing window). Returns updated frames if any split collapsed.
+    public func collapseImpossibleEmptySplits(
+        in spaceKey: SpaceKey,
+        screenBounds: CGRect
+    ) -> [WindowID: CGRect]? {
+        guard var t = trees[spaceKey], !t.isEmpty else { return nil }
+        var collapsedAny = false
+
+        while let impossibleSplitID = findImpossibleEmptySplit(in: t.root, bounds: screenBounds) {
+            guard t.collapseEmptyChild(splitID: impossibleSplitID) else { break }
+            collapsedAny = true
+        }
+
+        guard collapsedAny else { return nil }
+        store(t, for: spaceKey)
+        return t.windowFrames(in: screenBounds)
+    }
+
+    private func findImpossibleEmptySplit(in node: LayoutTree.Node, bounds: CGRect) -> NodeID? {
+        guard case .split(let id, let axis, let ratio, let first, let second) = node else {
+            return nil
+        }
+        let parentLength = axis == .vertical ? bounds.width : bounds.height
+        if first.isCompletelyEmpty != second.isCompletelyEmpty {
+            let occupied = first.isCompletelyEmpty ? second : first
+            let occupiedMin = SeamGeometry.minimumExtent(of: occupied, along: axis, minSizes: learnedMinSizes)
+            if occupiedMin + 48 > parentLength {
+                return id
+            }
+        }
+        let (firstRect, secondRect, _) = bounds.splitFlush(axis: axis, ratio: ratio)
+        return findImpossibleEmptySplit(in: first, bounds: firstRect)
+            ?? findImpossibleEmptySplit(in: second, bounds: secondRect)
     }
 
     /// Recompute frames for a space (e.g. after display resolution or Dock size changes).

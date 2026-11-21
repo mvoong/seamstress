@@ -409,8 +409,18 @@ public enum SeamGeometry {
             if computedMin <= computedMax {
                 minRatio = max(0.05, computedMin)
                 maxRatio = min(0.95, computedMax)
+            } else if second.isCompletelyEmpty && !first.isCompletelyEmpty {
+                // Occupied first side exceeds available space next to an empty slot: allow
+                // dragging toward the empty side to expand/collapse instead of freezing.
+                minRatio = min(seam.ratio, 0.95)
+                maxRatio = 0.95
+            } else if first.isCompletelyEmpty && !second.isCompletelyEmpty {
+                // Occupied second side exceeds available space next to an empty slot: allow
+                // dragging toward the empty side to expand/collapse instead of freezing.
+                minRatio = 0.05
+                maxRatio = max(seam.ratio, 0.05)
             } else {
-                // Both sides want more than available space; hold current ratio safely.
+                // Both occupied sides want more than available space; hold current ratio safely.
                 minRatio = seam.ratio
                 maxRatio = seam.ratio
             }

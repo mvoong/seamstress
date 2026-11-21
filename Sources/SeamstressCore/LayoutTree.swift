@@ -90,6 +90,16 @@ public struct LayoutTree: Equatable, Sendable {
         findLeafID(for: windowID, in: root)
     }
 
+    public func node(withID targetID: NodeID) -> Node? {
+        findNode(withID: targetID, in: root)
+    }
+
+    private func findNode(withID targetID: NodeID, in node: Node) -> Node? {
+        if node.id == targetID { return node }
+        guard case .split(_, _, _, let first, let second) = node else { return nil }
+        return findNode(withID: targetID, in: first) ?? findNode(withID: targetID, in: second)
+    }
+
     private func findLeafID(for windowID: WindowID, in node: Node) -> NodeID? {
         switch node {
         case .empty:
@@ -181,11 +191,17 @@ public struct LayoutTree: Equatable, Sendable {
         return applied
     }
 
-    /// Split an empty leaf 50/50 along `edge`, placing `windowID` on `edge`'s half
-    /// and leaving the opposite half `.empty`.
+    /// Split an empty leaf along `edge` at `ratio` (default 50/50), placing `windowID` on `edge`'s
+    /// side and leaving the opposite side `.empty`.
     @discardableResult
-    public mutating func splitEmpty(leafID: NodeID, edge: SplitEdge, with windowID: WindowID) -> Bool {
+    public mutating func splitEmpty(
+        leafID: NodeID,
+        edge: SplitEdge,
+        ratio: CGFloat = 0.5,
+        with windowID: WindowID
+    ) -> Bool {
         var applied = false
+        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let winLeafID = allocID()
         let emptyLeafID = allocID()
@@ -195,19 +211,25 @@ public struct LayoutTree: Equatable, Sendable {
             let winNode: Node = .window(id: winLeafID, windowID: windowID)
             let emptyNode: Node = .empty(id: emptyLeafID)
             if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: winNode, second: emptyNode)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: winNode, second: emptyNode)
             } else {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: emptyNode, second: winNode)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: emptyNode, second: winNode)
             }
         }
         return applied
     }
 
-    /// Split any node (leaf or existing `.split` subtree) 50/50 along `edge`, placing
-    /// `incomingWindowID` on `edge`'s half and keeping the existing subtree on the opposite half.
+    /// Split any node (leaf or existing `.split` subtree) along `edge` at `ratio` (default 50/50),
+    /// placing `incomingWindowID` on `edge`'s side and keeping the existing subtree on the opposite side.
     @discardableResult
-    public mutating func splitNode(nodeID: NodeID, edge: SplitEdge, with incomingWindowID: WindowID) -> Bool {
+    public mutating func splitNode(
+        nodeID: NodeID,
+        edge: SplitEdge,
+        ratio: CGFloat = 0.5,
+        with incomingWindowID: WindowID
+    ) -> Bool {
         var applied = false
+        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let newLeafID = allocID()
         root = mapNode(root) { node in
@@ -215,19 +237,25 @@ public struct LayoutTree: Equatable, Sendable {
             applied = true
             let incomingNode: Node = .window(id: newLeafID, windowID: incomingWindowID)
             if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: incomingNode, second: node)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: incomingNode, second: node)
             } else {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: node, second: incomingNode)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: node, second: incomingNode)
             }
         }
         return applied
     }
 
-    /// Split an occupied leaf 50/50 along `edge`, placing `incomingWindowID` on `edge`'s half
-    /// and keeping the existing window on the opposite half.
+    /// Split an occupied leaf along `edge` at `ratio` (default 50/50), placing `incomingWindowID`
+    /// on `edge`'s side and keeping the existing window on the opposite side.
     @discardableResult
-    public mutating func splitOccupied(leafID: NodeID, edge: SplitEdge, with incomingWindowID: WindowID) -> Bool {
+    public mutating func splitOccupied(
+        leafID: NodeID,
+        edge: SplitEdge,
+        ratio: CGFloat = 0.5,
+        with incomingWindowID: WindowID
+    ) -> Bool {
         var applied = false
+        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let newLeafID = allocID()
         root = mapNode(root) { node in
@@ -236,18 +264,24 @@ public struct LayoutTree: Equatable, Sendable {
             let existingNode: Node = .window(id: id, windowID: existing)
             let incomingNode: Node = .window(id: newLeafID, windowID: incomingWindowID)
             if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: incomingNode, second: existingNode)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: incomingNode, second: existingNode)
             } else {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: existingNode, second: incomingNode)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: existingNode, second: incomingNode)
             }
         }
         return applied
     }
 
-    /// Shrink an occupied leaf to `edge`'s half of its own slot, leaving the other half `.empty`.
+    /// Shrink an occupied leaf to `edge`'s side of its own slot at `ratio` (default 50/50),
+    /// leaving the other side `.empty`.
     @discardableResult
-    public mutating func shrinkToEdge(leafID: NodeID, edge: SplitEdge) -> Bool {
+    public mutating func shrinkToEdge(
+        leafID: NodeID,
+        edge: SplitEdge,
+        ratio: CGFloat = 0.5
+    ) -> Bool {
         var applied = false
+        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let emptyLeafID = allocID()
         root = mapNode(root) { node in
@@ -256,9 +290,9 @@ public struct LayoutTree: Equatable, Sendable {
             let winNode: Node = .window(id: id, windowID: wid)
             let emptyNode: Node = .empty(id: emptyLeafID)
             if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: winNode, second: emptyNode)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: winNode, second: emptyNode)
             } else {
-                return .split(id: splitID, axis: edge.axis, ratio: 0.5, first: emptyNode, second: winNode)
+                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: emptyNode, second: winNode)
             }
         }
         return applied

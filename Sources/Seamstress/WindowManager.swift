@@ -648,6 +648,7 @@ final class WindowManager: ObservableObject {
     }
 
     private func learnSettledMinimumSizes(expected: [WindowID: CGRect], in spaceKey: SpaceKey) {
+        var learnedAny = false
         for (wid, target) in expected {
             guard store.spaceKey(for: wid) == spaceKey,
                   let actual = axBridge.windowBounds(windowID: wid) else {
@@ -659,8 +660,16 @@ final class WindowManager: ObservableObject {
             if actual.height > target.height + 6 { minH = actual.height }
             if minW > 0 || minH > 0 {
                 store.recordMinimumSize(CGSize(width: minW, height: minH), for: wid)
+                learnedAny = true
                 SeamstressLog.layout.debug("Learned settled min size for window \(wid): \(Int(minW))x\(Int(minH))")
             }
+        }
+        if learnedAny,
+           let bounds = displayObserver.usableBounds(for: spaceKey),
+           let updatedFrames = store.collapseImpossibleEmptySplits(in: spaceKey, screenBounds: bounds) {
+            SeamstressLog.layout.info("Collapsed over-constrained empty split in \(spaceKey.description, privacy: .public)")
+            axBridge.applyFrames(updatedFrames, crossMonitorSafe: false)
+            refreshSeamsAndUI()
         }
     }
 
@@ -748,6 +757,7 @@ final class WindowManager: ObservableObject {
             }
 
             axBridge.register(windowID: session.window.windowID, pid: session.window.ownerPID)
+            recordDeclaredMinSizeIfAvailable(for: session.window.windowID)
             session.phase = .moving
             inputTap.setHasActiveWindowMove(true)
 
@@ -926,6 +936,9 @@ final class WindowManager: ObservableObject {
         let detachedIDs = Set(commit.detachedWindows.keys)
         let expectedAll = allFrames
 
+        let targetSpace = plan.targetSpace
+        let expectedTargetFrames = commit.framesToApply
+
         // Apply immediately, then verify once after macOS finishes its native mouse-up tracking.
         axBridge.applyFrames(allFrames, crossMonitorSafe: true) { [weak self] in
             guard let self else { return }
@@ -964,6 +977,10 @@ final class WindowManager: ObservableObject {
                         self.axBridge.applyFrames(drifted, crossMonitorSafe: true)
                     }
                 }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { [weak self] in
+                guard let self, self.isRunning, self.windowDrag == nil, self.seamDrag == nil else { return }
+                self.learnSettledMinimumSizes(expected: expectedTargetFrames, in: targetSpace)
             }
         }
 

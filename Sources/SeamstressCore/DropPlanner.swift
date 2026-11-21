@@ -33,12 +33,20 @@ public struct DropPlan: Equatable, Sendable {
     public let action: Action
     public let previewRect: CGRect
     public let previewKind: DropPreviewKind
+    public let splitRatio: CGFloat
 
-    public init(targetSpace: SpaceKey, action: Action, previewRect: CGRect, previewKind: DropPreviewKind) {
+    public init(
+        targetSpace: SpaceKey,
+        action: Action,
+        previewRect: CGRect,
+        previewKind: DropPreviewKind,
+        splitRatio: CGFloat = 0.5
+    ) {
         self.targetSpace = targetSpace
         self.action = action
         self.previewRect = previewRect
         self.previewKind = previewKind
+        self.splitRatio = splitRatio
     }
 }
 
@@ -63,28 +71,45 @@ public enum DropPlanner {
         targetSpace: SpaceKey,
         tree: LayoutTree,
         screenBounds: CGRect,
-        isDraggedWindowTiled: Bool? = nil
+        isDraggedWindowTiled: Bool? = nil,
+        minSizes: [WindowID: CGSize] = [:]
     ) -> DropPlan? {
         guard screenBounds.contains(pointer) else { return nil }
+
+        let draggedMinForAxis: (SplitAxis) -> CGFloat = { axis in
+            SeamGeometry.minimumExtent(
+                of: .window(id: 0, windowID: draggedWindowID),
+                along: axis,
+                minSizes: minSizes
+            )
+        }
 
         // Check T-junctions of existing `.split` containers first: dragging near the top/bottom
         // of a vertical seam (┬ / ┴) or left/right of a horizontal seam (├ / ┤) splits that
         // entire split container along the perpendicular axis.
-        if let tHit = tJunctionHit(pointer: pointer, in: tree.root, bounds: screenBounds) {
-            let fallbackPreview = halfRect(of: tHit.containerBounds, edge: tHit.edge)
+        if let tHit = tJunctionHit(pointer: pointer, in: tree.root, bounds: screenBounds),
+           let ratio = tJunctionSplitRatio(
+               tHit: tHit,
+               draggedWindowID: draggedWindowID,
+               tree: tree,
+               screenBounds: screenBounds,
+               minSizes: minSizes
+           ) {
+            let fallbackPreview = splitRect(of: tHit.containerBounds, edge: tHit.edge, ratio: ratio)
             let preview = simulatedPreviewRect(
                 tree: tree,
                 draggedWindowID: draggedWindowID,
                 screenBounds: screenBounds,
                 fallback: fallbackPreview
             ) { simulated in
-                simulated.splitNode(nodeID: tHit.nodeID, edge: tHit.edge, with: draggedWindowID)
+                simulated.splitNode(nodeID: tHit.nodeID, edge: tHit.edge, ratio: ratio, with: draggedWindowID)
             }
             return DropPlan(
                 targetSpace: targetSpace,
                 action: .splitNode(nodeID: tHit.nodeID, edge: tHit.edge),
                 previewRect: preview,
-                previewKind: .splitContainer
+                previewKind: .splitContainer,
+                splitRatio: ratio
             )
         }
 
@@ -98,21 +123,32 @@ public enum DropPlanner {
         // Case 1: Empty space (either empty screen or empty BSP slot)
         if leaf.isEmpty {
             if let edge = edgeBandHit(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
-                let preview = halfRect(of: cell, edge: edge)
-                return DropPlan(
-                    targetSpace: targetSpace,
-                    action: .splitEmpty(leafID: leaf.leafID, edge: edge),
-                    previewRect: preview,
-                    previewKind: .split
-                )
-            } else {
-                return DropPlan(
-                    targetSpace: targetSpace,
-                    action: .fillEmpty(leafID: leaf.leafID),
-                    previewRect: cell,
-                    previewKind: .fill
-                )
+                let winMin = draggedMinForAxis(edge.axis)
+                let emptyMin = SeamGeometry.defaultMinLeafDimension
+                let parentLength = edge.axis == .vertical ? cell.width : cell.height
+                let firstMin = edge.isFirstChild ? winMin : emptyMin
+                let secondMin = edge.isFirstChild ? emptyMin : winMin
+                if let ratio = feasibleSplitRatio(
+                    parentLength: parentLength,
+                    firstMinPx: firstMin,
+                    secondMinPx: secondMin
+                ) {
+                    let preview = splitRect(of: cell, edge: edge, ratio: ratio)
+                    return DropPlan(
+                        targetSpace: targetSpace,
+                        action: .splitEmpty(leafID: leaf.leafID, edge: edge),
+                        previewRect: preview,
+                        previewKind: .split,
+                        splitRatio: ratio
+                    )
+                }
             }
+            return DropPlan(
+                targetSpace: targetSpace,
+                action: .fillEmpty(leafID: leaf.leafID),
+                previewRect: cell,
+                previewKind: .fill
+            )
         }
 
         guard let occupant = leaf.windowID else { return nil }
@@ -120,30 +156,41 @@ public enum DropPlanner {
         // Case 2: Dragging a tiled window over its own slot
         if occupant == draggedWindowID {
             if let edge = edgeBandHit(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
-                let preview = halfRect(of: cell, edge: edge)
-                return DropPlan(
-                    targetSpace: targetSpace,
-                    action: .shrinkOwnSlot(leafID: leaf.leafID, edge: edge),
-                    previewRect: preview,
-                    previewKind: .split
-                )
-            } else {
-                return DropPlan(
-                    targetSpace: targetSpace,
-                    action: .keepInPlace(leafID: leaf.leafID),
-                    previewRect: cell,
-                    previewKind: .fill
-                )
+                let winMin = draggedMinForAxis(edge.axis)
+                let emptyMin = SeamGeometry.defaultMinLeafDimension
+                let parentLength = edge.axis == .vertical ? cell.width : cell.height
+                let firstMin = edge.isFirstChild ? winMin : emptyMin
+                let secondMin = edge.isFirstChild ? emptyMin : winMin
+                if let ratio = feasibleSplitRatio(
+                    parentLength: parentLength,
+                    firstMinPx: firstMin,
+                    secondMinPx: secondMin
+                ) {
+                    let preview = splitRect(of: cell, edge: edge, ratio: ratio)
+                    return DropPlan(
+                        targetSpace: targetSpace,
+                        action: .shrinkOwnSlot(leafID: leaf.leafID, edge: edge),
+                        previewRect: preview,
+                        previewKind: .split,
+                        splitRatio: ratio
+                    )
+                }
             }
+            return DropPlan(
+                targetSpace: targetSpace,
+                action: .keepInPlace(leafID: leaf.leafID),
+                previewRect: cell,
+                previewKind: .fill
+            )
         }
 
         // Case 3: Occupied slot belonging to another window
         let centerInsetX = cell.width * (1 - occupiedCenterFraction) * 0.5
         let centerInsetY = cell.height * (1 - occupiedCenterFraction) * 0.5
         let centerRect = cell.insetBy(dx: centerInsetX, dy: centerInsetY)
+        let isTiled = isDraggedWindowTiled ?? tree.contains(windowID: draggedWindowID)
 
         if centerRect.contains(pointer) {
-            let isTiled = isDraggedWindowTiled ?? tree.contains(windowID: draggedWindowID)
             return DropPlan(
                 targetSpace: targetSpace,
                 action: .swapOrReplace(leafID: leaf.leafID, targetWindowID: occupant),
@@ -153,21 +200,118 @@ public enum DropPlanner {
         }
 
         let edge = nearestEdge(point: pointer, in: cell)
-        let fallbackPreview = halfRect(of: cell, edge: edge)
+        let effectiveCell: CGRect
+        if let oldLeafID = tree.leafID(for: draggedWindowID) {
+            var collapsed = tree
+            collapsed.removeLeafAndCollapse(leafID: oldLeafID)
+            effectiveCell = collapsed.windowFrames(in: screenBounds)[occupant] ?? cell
+        } else {
+            effectiveCell = cell
+        }
+
+        let draggedMin = draggedMinForAxis(edge.axis)
+        let occupantMin = SeamGeometry.minimumExtent(
+            of: .window(id: 0, windowID: occupant),
+            along: edge.axis,
+            minSizes: minSizes
+        )
+        let effectiveLength = edge.axis == .vertical ? effectiveCell.width : effectiveCell.height
+        let firstMin = edge.isFirstChild ? draggedMin : occupantMin
+        let secondMin = edge.isFirstChild ? occupantMin : draggedMin
+
+        guard let ratio = feasibleSplitRatio(
+            parentLength: effectiveLength,
+            firstMinPx: firstMin,
+            secondMinPx: secondMin
+        ) else {
+            // Cannot fit both windows side-by-side along this axis; fall back to swap/replace.
+            return DropPlan(
+                targetSpace: targetSpace,
+                action: .swapOrReplace(leafID: leaf.leafID, targetWindowID: occupant),
+                previewRect: cell,
+                previewKind: isTiled ? .swap : .replace
+            )
+        }
+
+        let fallbackPreview = splitRect(of: effectiveCell, edge: edge, ratio: ratio)
         let preview = simulatedPreviewRect(
             tree: tree,
             draggedWindowID: draggedWindowID,
             screenBounds: screenBounds,
             fallback: fallbackPreview
         ) { simulated in
-            simulated.splitOccupied(leafID: leaf.leafID, edge: edge, with: draggedWindowID)
+            simulated.splitOccupied(leafID: leaf.leafID, edge: edge, ratio: ratio, with: draggedWindowID)
         }
         return DropPlan(
             targetSpace: targetSpace,
             action: .splitOccupied(leafID: leaf.leafID, edge: edge),
             previewRect: preview,
-            previewKind: .split
+            previewKind: .split,
+            splitRatio: ratio
         )
+    }
+
+    /// Computes a clamped initial split ratio (preferring 0.5) when both sides' minimum extents
+    /// can fit inside `parentLength`, or returns `nil` when the split is geometrically impossible.
+    private static func feasibleSplitRatio(
+        parentLength: CGFloat,
+        firstMinPx: CGFloat,
+        secondMinPx: CGFloat
+    ) -> CGFloat? {
+        guard parentLength > 1 else { return nil }
+        guard firstMinPx + secondMinPx <= parentLength + 0.5 else { return nil }
+        let minRatio = max(0.05, firstMinPx / parentLength)
+        let maxRatio = min(0.95, 1.0 - (secondMinPx / parentLength))
+        guard minRatio <= maxRatio else { return nil }
+        return min(max(0.5, minRatio), maxRatio)
+    }
+
+    private static func tJunctionSplitRatio(
+        tHit: TJunctionCandidate,
+        draggedWindowID: WindowID,
+        tree: LayoutTree,
+        screenBounds: CGRect,
+        minSizes: [WindowID: CGSize]
+    ) -> CGFloat? {
+        let effectiveBounds: CGRect
+        let existingNode: LayoutTree.Node?
+        if let oldLeafID = tree.leafID(for: draggedWindowID) {
+            var collapsed = tree
+            collapsed.removeLeafAndCollapse(leafID: oldLeafID)
+            if let survivingNode = collapsed.node(withID: tHit.nodeID) {
+                existingNode = survivingNode
+                effectiveBounds = nodeBounds(of: tHit.nodeID, in: collapsed.root, bounds: screenBounds) ?? tHit.containerBounds
+            } else {
+                // Dragged window was inside this T-junction split; collapsing it promotes its sibling
+                // to occupy the container.
+                existingNode = collapsed.root
+                effectiveBounds = tHit.containerBounds
+            }
+        } else {
+            existingNode = tree.node(withID: tHit.nodeID)
+            effectiveBounds = tHit.containerBounds
+        }
+
+        let draggedMin = SeamGeometry.minimumExtent(
+            of: .window(id: 0, windowID: draggedWindowID),
+            along: tHit.edge.axis,
+            minSizes: minSizes
+        )
+        let containerMin = existingNode.map {
+            SeamGeometry.minimumExtent(of: $0, along: tHit.edge.axis, minSizes: minSizes)
+        } ?? SeamGeometry.defaultMinLeafDimension
+        let length = tHit.edge.axis == .vertical ? effectiveBounds.width : effectiveBounds.height
+        let firstMin = tHit.edge.isFirstChild ? draggedMin : containerMin
+        let secondMin = tHit.edge.isFirstChild ? containerMin : draggedMin
+        return feasibleSplitRatio(parentLength: length, firstMinPx: firstMin, secondMinPx: secondMin)
+    }
+
+    private static func nodeBounds(of targetID: NodeID, in node: LayoutTree.Node, bounds: CGRect) -> CGRect? {
+        if node.id == targetID { return bounds }
+        guard case .split(_, let axis, let ratio, let first, let second) = node else { return nil }
+        let (firstRect, secondRect, _) = bounds.splitFlush(axis: axis, ratio: ratio)
+        return nodeBounds(of: targetID, in: first, bounds: firstRect)
+            ?? nodeBounds(of: targetID, in: second, bounds: secondRect)
     }
 
     /// Simulates a same-space move + old-leaf collapse on a copy of `tree` to produce a WYSIWYG
@@ -228,8 +372,8 @@ public enum DropPlanner {
         return distances.min(by: { $0.1 < $1.1 })?.0 ?? .right
     }
 
-    private static func halfRect(of cell: CGRect, edge: SplitEdge) -> CGRect {
-        let (first, second, _) = cell.splitFlush(axis: edge.axis, ratio: 0.5)
+    private static func splitRect(of cell: CGRect, edge: SplitEdge, ratio: CGFloat = 0.5) -> CGRect {
+        let (first, second, _) = cell.splitFlush(axis: edge.axis, ratio: ratio)
         return edge.isFirstChild ? first : second
     }
 

@@ -220,4 +220,35 @@ final class SeamGeometryTests: XCTestCase {
         )
         XCTAssertFalse(unclamped.isClamped)
     }
+
+    func testOverConstrainedEmptySplitAllowsDraggingTowardEmptySideToCollapse() {
+        // Window 1 has minWidth 760 inside a 766px container next to an empty right half:
+        // computedMin (760/766 = 0.992) > computedMax (1 - 48/766 = 0.937).
+        let halfScreen = CGRect(x: 0, y: 0, width: 766, height: 950)
+        var tree = LayoutTree()
+        tree.splitEmpty(leafID: tree.root.id, edge: .left, with: 1)
+        let seam = SeamGeometry.seams(in: tree, spaceKey: space, bounds: halfScreen)[0]
+        let minSizes: [WindowID: CGSize] = [1: CGSize(width: 760, height: 512)]
+
+        // Dragging right toward the empty side must move instead of freezing at 0.5
+        let dragRight = SeamGeometry.dragUpdate(
+            pointer: CGPoint(x: 600, y: 475),
+            seam: seam,
+            tree: tree,
+            minSizes: minSizes,
+            disableSnapping: true
+        )
+        XCTAssertEqual(dragRight.collapseTarget, .none)
+        XCTAssertGreaterThan(dragRight.ratio, 0.75)
+
+        // Dragging past 90% triggers collapseSecond
+        let dragCollapse = SeamGeometry.dragUpdate(
+            pointer: CGPoint(x: 720, y: 475),
+            seam: seam,
+            tree: tree,
+            minSizes: minSizes,
+            disableSnapping: true
+        )
+        XCTAssertEqual(dragCollapse.collapseTarget, .collapseSecond(expandedBounds: halfScreen))
+    }
 }
