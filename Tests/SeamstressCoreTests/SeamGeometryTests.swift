@@ -17,9 +17,9 @@ final class SeamGeometryTests: XCTestCase {
         XCTAssertEqual(seams[0].hitRect, CGRect(x: 495, y: 0, width: 10, height: 800))
 
         // Inside 10px hit strip
-        XCTAssertEqual(SeamGeometry.hitTest(point: CGPoint(x: 504, y: 300), seams: seams)?.splitID, seams[0].splitID)
+        XCTAssertEqual(SeamGeometry.hitTestTarget(point: CGPoint(x: 504, y: 300), seams: seams), .single(seams[0]))
         // Outside hit strip
-        XCTAssertNil(SeamGeometry.hitTest(point: CGPoint(x: 506, y: 300), seams: seams))
+        XCTAssertNil(SeamGeometry.hitTestTarget(point: CGPoint(x: 506, y: 300), seams: seams))
 
         // Clamps against learned min size of window 1 (300px) and window 2 (400px)
         let minSizes: [WindowID: CGSize] = [1: CGSize(width: 300, height: 200), 2: CGSize(width: 400, height: 200)]

@@ -164,12 +164,7 @@ public struct LayoutTree: Equatable, Sendable {
             return LeafPlacement(leafID: id, windowID: wid, frame: bounds)
         case .split(_, let axis, let ratio, let first, let second):
             let (firstRect, secondRect, seamPos) = bounds.splitFlush(axis: axis, ratio: ratio)
-            let goFirst: Bool
-            switch axis {
-            case .vertical: goFirst = point.x < seamPos
-            case .horizontal: goFirst = point.y < seamPos
-            }
-            if goFirst {
+            if point.coordinate(along: axis) < seamPos {
                 return findLeaf(at: point, node: first, bounds: firstRect)
             } else {
                 return findLeaf(at: point, node: second, bounds: secondRect)
@@ -201,20 +196,19 @@ public struct LayoutTree: Equatable, Sendable {
         with windowID: WindowID
     ) -> Bool {
         var applied = false
-        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let winLeafID = allocID()
         let emptyLeafID = allocID()
         root = mapNode(root) { node in
             guard case .empty(let id) = node, id == leafID else { return node }
             applied = true
-            let winNode: Node = .window(id: winLeafID, windowID: windowID)
-            let emptyNode: Node = .empty(id: emptyLeafID)
-            if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: winNode, second: emptyNode)
-            } else {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: emptyNode, second: winNode)
-            }
+            return Self.makeSplit(
+                id: splitID,
+                edge: edge,
+                ratio: ratio,
+                incoming: .window(id: winLeafID, windowID: windowID),
+                existing: .empty(id: emptyLeafID)
+            )
         }
         return applied
     }
@@ -229,18 +223,18 @@ public struct LayoutTree: Equatable, Sendable {
         with incomingWindowID: WindowID
     ) -> Bool {
         var applied = false
-        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let newLeafID = allocID()
         root = mapNode(root) { node in
             guard node.id == nodeID else { return node }
             applied = true
-            let incomingNode: Node = .window(id: newLeafID, windowID: incomingWindowID)
-            if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: incomingNode, second: node)
-            } else {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: node, second: incomingNode)
-            }
+            return Self.makeSplit(
+                id: splitID,
+                edge: edge,
+                ratio: ratio,
+                incoming: .window(id: newLeafID, windowID: incomingWindowID),
+                existing: node
+            )
         }
         return applied
     }
@@ -255,19 +249,18 @@ public struct LayoutTree: Equatable, Sendable {
         with incomingWindowID: WindowID
     ) -> Bool {
         var applied = false
-        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let newLeafID = allocID()
         root = mapNode(root) { node in
             guard case .window(let id, let existing) = node, id == leafID else { return node }
             applied = true
-            let existingNode: Node = .window(id: id, windowID: existing)
-            let incomingNode: Node = .window(id: newLeafID, windowID: incomingWindowID)
-            if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: incomingNode, second: existingNode)
-            } else {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: existingNode, second: incomingNode)
-            }
+            return Self.makeSplit(
+                id: splitID,
+                edge: edge,
+                ratio: ratio,
+                incoming: .window(id: newLeafID, windowID: incomingWindowID),
+                existing: .window(id: id, windowID: existing)
+            )
         }
         return applied
     }
@@ -281,19 +274,18 @@ public struct LayoutTree: Equatable, Sendable {
         ratio: CGFloat = 0.5
     ) -> Bool {
         var applied = false
-        let clampedRatio = min(max(ratio, 0.05), 0.95)
         let splitID = allocID()
         let emptyLeafID = allocID()
         root = mapNode(root) { node in
             guard case .window(let id, let wid) = node, id == leafID else { return node }
             applied = true
-            let winNode: Node = .window(id: id, windowID: wid)
-            let emptyNode: Node = .empty(id: emptyLeafID)
-            if edge.isFirstChild {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: winNode, second: emptyNode)
-            } else {
-                return .split(id: splitID, axis: edge.axis, ratio: clampedRatio, first: emptyNode, second: winNode)
-            }
+            return Self.makeSplit(
+                id: splitID,
+                edge: edge,
+                ratio: ratio,
+                incoming: .window(id: id, windowID: wid),
+                existing: .empty(id: emptyLeafID)
+            )
         }
         return applied
     }
@@ -461,6 +453,21 @@ public struct LayoutTree: Equatable, Sendable {
     }
 
     // MARK: - Helpers
+
+    private static func makeSplit(
+        id: NodeID,
+        edge: SplitEdge,
+        ratio: CGFloat,
+        incoming: Node,
+        existing: Node
+    ) -> Node {
+        let clampedRatio = min(max(ratio, 0.05), 0.95)
+        if edge.isFirstChild {
+            return .split(id: id, axis: edge.axis, ratio: clampedRatio, first: incoming, second: existing)
+        } else {
+            return .split(id: id, axis: edge.axis, ratio: clampedRatio, first: existing, second: incoming)
+        }
+    }
 
     private func mapNode(_ node: Node, transform: (Node) -> Node) -> Node {
         switch node {

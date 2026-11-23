@@ -19,7 +19,7 @@ public struct VisibleSeam: Equatable, Sendable {
     public let ratio: CGFloat
     /// Pixel coordinate along the split axis (X for vertical, Y for horizontal).
     public let seamPosition: CGFloat
-    /// 8pt invisible hit strip along the flush seam.
+    /// 10pt invisible hit strip along the flush seam.
     public let hitRect: CGRect
     /// 2pt hairline visual rect along the seam.
     public let visualRect: CGRect
@@ -156,6 +156,8 @@ public enum SeamGeometry {
     public static let visualThickness: CGFloat = 2
     /// Fallback minimum dimension per occupied leaf when app min size is unknown.
     public static let defaultMinLeafDimension: CGFloat = 140
+    /// Minimum dimension reserved for an empty slot before clamping/collapsing.
+    public static let minEmptySlotDimension: CGFloat = 48
     /// Dragging past 90% toward an empty side triggers collapse-on-release.
     public static let collapseThreshold: CGFloat = 0.90
     /// Magnetic snap tolerance in points for detents and co-linear seam alignment.
@@ -223,17 +225,13 @@ public enum SeamGeometry {
             // corner overlap cleanly in the 10×10pt junction box.
             let expandedHit = seam.hitRect.insetBy(dx: -hitThickness * 0.5, dy: -hitThickness * 0.5)
             guard expandedHit.contains(point) else { continue }
+            let dist = abs(point.coordinate(along: seam.axis) - seam.seamPosition)
+            guard dist <= hitThickness * 0.5 else { continue }
             switch seam.axis {
             case .vertical:
-                let dist = abs(point.x - seam.seamPosition)
-                if dist <= hitThickness * 0.5 {
-                    hitVerticals.append((seam, dist))
-                }
+                hitVerticals.append((seam, dist))
             case .horizontal:
-                let dist = abs(point.y - seam.seamPosition)
-                if dist <= hitThickness * 0.5 {
-                    hitHorizontals.append((seam, dist))
-                }
+                hitHorizontals.append((seam, dist))
             }
         }
 
@@ -253,26 +251,6 @@ public enum SeamGeometry {
         return nil
     }
 
-    /// Hit-test `point` against a precomputed list of visible seams.
-    /// Prefers the seam whose center line is closest to `point` (and shallower/longer seams on exact ties).
-    public static func hitTest(point: CGPoint, seams: [VisibleSeam]) -> VisibleSeam? {
-        var best: VisibleSeam?
-        var bestDist = CGFloat.greatestFiniteMagnitude
-        for seam in seams {
-            guard seam.hitRect.contains(point) else { continue }
-            let dist: CGFloat
-            switch seam.axis {
-            case .vertical: dist = abs(point.x - seam.seamPosition)
-            case .horizontal: dist = abs(point.y - seam.seamPosition)
-            }
-            if dist < bestDist || (dist == bestDist && (best == nil || seam.depth < best!.depth)) {
-                best = seam
-                bestDist = dist
-            }
-        }
-        return best
-    }
-
     /// Minimum pixel extent required by `node` along `axis`, accounting for known app min sizes.
     public static func minimumExtent(
         of node: LayoutTree.Node,
@@ -284,8 +262,7 @@ public enum SeamGeometry {
             return 0
         case .window(_, let wid):
             if let size = minSizes[wid] {
-                let d = axis == .vertical ? size.width : size.height
-                return max(d, defaultMinLeafDimension)
+                return max(size.span(along: axis), defaultMinLeafDimension)
             }
             return defaultMinLeafDimension
         case .split(_, let childAxis, _, let first, let second):
@@ -309,20 +286,9 @@ public enum SeamGeometry {
         disableSnapping: Bool = false,
         grabOffset: CGFloat = 0
     ) -> SeamDragUpdate {
-        let parentStart: CGFloat
-        let parentLength: CGFloat
-        let cursorCoord: CGFloat
-
-        switch seam.axis {
-        case .vertical:
-            parentStart = seam.parentBounds.minX
-            parentLength = seam.parentBounds.width
-            cursorCoord = pointer.x
-        case .horizontal:
-            parentStart = seam.parentBounds.minY
-            parentLength = seam.parentBounds.height
-            cursorCoord = pointer.y
-        }
+        let parentStart = seam.parentBounds.start(along: seam.axis)
+        let parentLength = seam.parentBounds.span(along: seam.axis)
+        let cursorCoord = pointer.coordinate(along: seam.axis)
 
         guard parentLength > 1 else {
             return SeamDragUpdate(
@@ -398,10 +364,10 @@ public enum SeamGeometry {
         var minRatio: CGFloat = 0.08
         var maxRatio: CGFloat = 0.92
 
-        if let splitNode = findSplit(id: seam.splitID, in: tree.root),
+        if let splitNode = tree.node(withID: seam.splitID),
            case .split(_, _, _, let first, let second) = splitNode {
-            let firstMinPx = first.isCompletelyEmpty ? 48 : minimumExtent(of: first, along: seam.axis, minSizes: minSizes)
-            let secondMinPx = second.isCompletelyEmpty ? 48 : minimumExtent(of: second, along: seam.axis, minSizes: minSizes)
+            let firstMinPx = first.isCompletelyEmpty ? minEmptySlotDimension : minimumExtent(of: first, along: seam.axis, minSizes: minSizes)
+            let secondMinPx = second.isCompletelyEmpty ? minEmptySlotDimension : minimumExtent(of: second, along: seam.axis, minSizes: minSizes)
 
             let computedMin = firstMinPx / parentLength
             let computedMax = 1.0 - (secondMinPx / parentLength)
@@ -462,16 +428,6 @@ public enum SeamGeometry {
             return CGRect(x: seamPosition - halfVis, y: parentBounds.minY, width: visualThickness, height: parentBounds.height)
         case .horizontal:
             return CGRect(x: parentBounds.minX, y: seamPosition - halfVis, width: parentBounds.width, height: visualThickness)
-        }
-    }
-
-    private static func findSplit(id: NodeID, in node: LayoutTree.Node) -> LayoutTree.Node? {
-        switch node {
-        case .empty, .window:
-            return nil
-        case .split(let nodeID, _, _, let first, let second):
-            if nodeID == id { return node }
-            return findSplit(id: id, in: first) ?? findSplit(id: id, in: second)
         }
     }
 }

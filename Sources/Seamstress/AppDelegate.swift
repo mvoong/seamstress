@@ -3,6 +3,7 @@ import Cocoa
 import ServiceManagement
 import SwiftUI
 
+@MainActor
 final class AppState: ObservableObject {
     @Published var isEnabled: Bool = true
     @Published var showMenuBarIcon: Bool = true
@@ -80,6 +81,7 @@ final class AppState: ObservableObject {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appState = AppState()
     private let windowManager = WindowManager()
@@ -287,14 +289,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startTrustPolling() {
         trustPollTimer?.invalidate()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] t in
-            guard let self else { t.invalidate(); return }
-            if self.appState.refreshTrust() {
-                t.invalidate()
-                self.trustPollTimer = nil
-                if self.appState.isEnabled {
-                    self.windowManager.start()
+            MainActor.assumeIsolated {
+                guard let self else { t.invalidate(); return }
+                if self.appState.refreshTrust() {
+                    t.invalidate()
+                    self.trustPollTimer = nil
+                    if self.appState.isEnabled {
+                        self.windowManager.start()
+                    }
+                    self.updateStatusIcon()
                 }
-                self.updateStatusIcon()
             }
         }
         RunLoop.main.add(timer, forMode: .common)

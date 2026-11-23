@@ -3,14 +3,10 @@ import CoreGraphics
 import QuartzCore
 import SeamstressCore
 
-private final class NonActivatingSeamPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
-
 /// Visual hairline + grip pill shown when hovering or dragging a flush seam (or a 2-axis
 /// `┼` intersection of a vertical and horizontal seam). Also renders a full-pane expansion
 /// preview when dragging a seam past 90% into an empty slot.
+@MainActor
 final class SeamHighlightOverlay {
     private enum CursorMode: Equatable {
         case none
@@ -302,20 +298,7 @@ final class SeamHighlightOverlay {
     }
 
     private func makeLinePanel(assignGrip: (CALayer) -> Void) -> NSPanel {
-        let p = NonActivatingSeamPanel(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
-        p.isFloatingPanel = true
-        p.level = .statusBar
-        p.backgroundColor = .clear
-        p.isOpaque = false
-        p.hasShadow = false
-        p.ignoresMouseEvents = true
-        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        p.animationBehavior = .none
+        let p = OverlayPanel.make(level: .statusBar)
 
         let view = NSView(frame: .zero)
         view.wantsLayer = true
@@ -333,20 +316,7 @@ final class SeamHighlightOverlay {
     }
 
     private func makeIntersectionKnobPanel(assignKnob: (CALayer) -> Void) -> NSPanel {
-        let p = NonActivatingSeamPanel(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
-        p.isFloatingPanel = true
-        p.level = .statusBar
-        p.backgroundColor = .clear
-        p.isOpaque = false
-        p.hasShadow = false
-        p.ignoresMouseEvents = true
-        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        p.animationBehavior = .none
+        let p = OverlayPanel.make(level: .statusBar)
 
         let view = NSView(frame: .zero)
         view.wantsLayer = true
@@ -362,20 +332,7 @@ final class SeamHighlightOverlay {
     }
 
     private func makeCollapsePanel() -> NSPanel {
-        let p = NonActivatingSeamPanel(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
-        p.isFloatingPanel = true
-        p.level = .floating
-        p.backgroundColor = .clear
-        p.isOpaque = false
-        p.hasShadow = false
-        p.ignoresMouseEvents = true
-        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        p.animationBehavior = .none
+        let p = OverlayPanel.make(level: .floating)
 
         let view = NSView(frame: .zero)
         view.wantsLayer = true

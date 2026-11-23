@@ -154,13 +154,7 @@ public enum LayoutReconstructor {
         var best: Solution?
 
         func evaluateCut(axis: SplitAxis, cutCoord: CGFloat) {
-            let ratio: CGFloat
-            switch axis {
-            case .vertical:
-                ratio = (cutCoord - region.minX) / region.width
-            case .horizontal:
-                ratio = (cutCoord - region.minY) / region.height
-            }
+            let ratio = (cutCoord - region.start(along: axis)) / region.span(along: axis)
             guard ratio >= 0.08, ratio <= 0.92 else { return }
 
             let (firstRect, secondRect, _) = region.splitFlush(axis: axis, ratio: ratio)

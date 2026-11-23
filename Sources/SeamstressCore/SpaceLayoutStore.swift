@@ -412,11 +412,11 @@ public final class SpaceLayoutStore {
         guard case .split(let id, let axis, let ratio, let first, let second) = node else {
             return nil
         }
-        let parentLength = axis == .vertical ? bounds.width : bounds.height
+        let parentLength = bounds.span(along: axis)
         if first.isCompletelyEmpty != second.isCompletelyEmpty {
             let occupied = first.isCompletelyEmpty ? second : first
             let occupiedMin = SeamGeometry.minimumExtent(of: occupied, along: axis, minSizes: learnedMinSizes)
-            if occupiedMin + 48 > parentLength {
+            if occupiedMin + SeamGeometry.minEmptySlotDimension > parentLength {
                 return id
             }
         }

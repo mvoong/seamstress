@@ -17,10 +17,18 @@ struct DisplayInfo: Equatable {
     var spaceKey: SpaceKey {
         SpaceKey(displayUUID: uuid, spaceID: activeSpaceID)
     }
+
+    /// True when `frame` covers the full display including the menu bar (native macOS fullscreen).
+    func isNativeFullscreen(_ frame: CGRect) -> Bool {
+        fullFrameCG.height > usableFrameCG.height + 10
+            && abs(frame.width - fullFrameCG.width) <= 2
+            && abs(frame.height - fullFrameCG.height) <= 2
+    }
 }
 
 /// Caches connected displays, `primaryScreenHeight`, display UUIDs, and active native Space IDs.
 /// Refreshes automatically on display parameter changes and native Space switches.
+@MainActor
 final class DisplayObserver {
     private(set) var primaryScreenHeight: CGFloat = 0
     private(set) var displays: [DisplayInfo] = []
@@ -30,7 +38,8 @@ final class DisplayObserver {
     /// or active again (woke / unlocked).
     var onSessionActivityChanged: ((_ isActive: Bool) -> Void)?
 
-    private var observers: [NSObjectProtocol] = []
+    private var ncObservers: [NSObjectProtocol] = []
+    private var wsObservers: [NSObjectProtocol] = []
     private var distributedObservers: [NSObjectProtocol] = []
     private var isSystemAsleep = false
     private var areScreensAsleep = false
@@ -61,77 +70,81 @@ final class DisplayObserver {
     }
 
     func startObserving() {
-        guard observers.isEmpty else { return }
+        guard ncObservers.isEmpty && wsObservers.isEmpty else { return }
         let nc = NotificationCenter.default
         let ws = NSWorkspace.shared.notificationCenter
         let dnc = DistributedNotificationCenter.default()
 
-        observers.append(nc.addObserver(
+        ncObservers.append(nc.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            let changed = self.refresh()
-            self.onDisplaysOrSpacesChanged?(changed)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let changed = self.refresh()
+                self.onDisplaysOrSpacesChanged?(changed)
+            }
         })
 
-        observers.append(ws.addObserver(
+        wsObservers.append(ws.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            _ = self.refresh()
-            self.onDisplaysOrSpacesChanged?(false)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                _ = self.refresh()
+                self.onDisplaysOrSpacesChanged?(false)
+            }
         })
 
-        observers.append(ws.addObserver(
+        wsObservers.append(ws.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.isSystemAsleep = true
-            self.onSessionActivityChanged?(false)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isSystemAsleep = true
+                self.onSessionActivityChanged?(false)
+            }
         })
 
-        observers.append(ws.addObserver(
+        wsObservers.append(ws.addObserver(
             forName: NSWorkspace.screensDidSleepNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.areScreensAsleep = true
-            self.onSessionActivityChanged?(false)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.areScreensAsleep = true
+                self.onSessionActivityChanged?(false)
+            }
         })
 
-        observers.append(ws.addObserver(
+        wsObservers.append(ws.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.isSystemAsleep = false
-            _ = self.refresh()
-            if !self.isSessionInactive {
-                self.onSessionActivityChanged?(true)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isSystemAsleep = false
+                self.handleSessionResumed()
             }
-            self.onDisplaysOrSpacesChanged?(true)
         })
 
-        observers.append(ws.addObserver(
+        wsObservers.append(ws.addObserver(
             forName: NSWorkspace.screensDidWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.areScreensAsleep = false
-            _ = self.refresh()
-            if !self.isSessionInactive {
-                self.onSessionActivityChanged?(true)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.areScreensAsleep = false
+                self.handleSessionResumed()
             }
-            self.onDisplaysOrSpacesChanged?(true)
         })
 
         distributedObservers.append(dnc.addObserver(
@@ -139,9 +152,11 @@ final class DisplayObserver {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.isLockedFromNotification = true
-            self.onSessionActivityChanged?(false)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isLockedFromNotification = true
+                self.onSessionActivityChanged?(false)
+            }
         })
 
         distributedObservers.append(dnc.addObserver(
@@ -149,25 +164,34 @@ final class DisplayObserver {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.isLockedFromNotification = false
-            _ = self.refresh()
-            if !self.isSessionInactive {
-                self.onSessionActivityChanged?(true)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isLockedFromNotification = false
+                self.handleSessionResumed()
             }
-            self.onDisplaysOrSpacesChanged?(true)
         })
+    }
+
+    private func handleSessionResumed() {
+        _ = refresh()
+        if !isSessionInactive {
+            onSessionActivityChanged?(true)
+        }
+        onDisplaysOrSpacesChanged?(true)
     }
 
     func stopObserving() {
         let nc = NotificationCenter.default
         let ws = NSWorkspace.shared.notificationCenter
         let dnc = DistributedNotificationCenter.default()
-        for obs in observers {
+        for obs in ncObservers {
             nc.removeObserver(obs)
+        }
+        ncObservers.removeAll()
+        for obs in wsObservers {
             ws.removeObserver(obs)
         }
-        observers.removeAll()
+        wsObservers.removeAll()
         for obs in distributedObservers {
             dnc.removeObserver(obs)
         }
@@ -181,7 +205,7 @@ final class DisplayObserver {
     @discardableResult
     func refresh() -> Bool {
         let screens = NSScreen.screens
-        let primaryHeight = screens.first?.frame.height ?? 0
+        let primaryHeight = (screens.first(where: { $0.frame.origin == .zero }) ?? screens.first)?.frame.height ?? 0
         primaryScreenHeight = primaryHeight
 
         let activeSpaces = SkyLightBridge.shared.activeSpaceIDsByDisplay()

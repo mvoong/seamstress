@@ -13,7 +13,6 @@ final class SkyLightBridge {
 
     private typealias MainConnectionIDFn = @convention(c) () -> Int32
     private typealias CopyManagedDisplaySpacesFn = @convention(c) (Int32) -> CFArray?
-    private typealias CopySpacesForWindowsFn = @convention(c) (Int32, Int32, CFArray) -> CFArray?
     private typealias SetConnectionPropertyFn = @convention(c) (Int32, Int32, CFString, CFTypeRef) -> CGError
     private typealias QueryWindowsFn = @convention(c) (Int32, UnsafeRawPointer, Int32) -> UnsafeRawPointer?
     private typealias CopyWindowsFn = @convention(c) (UnsafeRawPointer) -> UnsafeRawPointer?
@@ -27,7 +26,6 @@ final class SkyLightBridge {
 
     private let mainConnectionID: MainConnectionIDFn?
     private let copyManagedDisplaySpaces: CopyManagedDisplaySpacesFn?
-    private let copySpacesForWindows: CopySpacesForWindowsFn?
     private let setConnectionProperty: SetConnectionPropertyFn?
     private let queryWindows: QueryWindowsFn?
     private let copyWindows: CopyWindowsFn?
@@ -47,8 +45,6 @@ final class SkyLightBridge {
             ?? sym("_CGSDefaultConnection", as: MainConnectionIDFn.self)
         self.copyManagedDisplaySpaces = sym("CGSCopyManagedDisplaySpaces", as: CopyManagedDisplaySpacesFn.self)
             ?? sym("SLSCopyManagedDisplaySpaces", as: CopyManagedDisplaySpacesFn.self)
-        self.copySpacesForWindows = sym("CGSCopySpacesForWindows", as: CopySpacesForWindowsFn.self)
-            ?? sym("SLSCopySpacesForWindows", as: CopySpacesForWindowsFn.self)
         self.setConnectionProperty = sym("CGSSetConnectionProperty", as: SetConnectionPropertyFn.self)
             ?? sym("SLSSetConnectionProperty", as: SetConnectionPropertyFn.self)
         self.queryWindows = sym("SLSWindowQueryWindows", as: QueryWindowsFn.self)
@@ -86,20 +82,6 @@ final class SkyLightBridge {
             }
         }
         return result
-    }
-
-    /// Returns all Space IDs a given window currently belongs to.
-    func spaceIDs(for windowID: WindowID) -> [SpaceID] {
-        guard let cidFn = mainConnectionID,
-              let copyWinSpaces = copySpacesForWindows else {
-            return []
-        }
-        var wid = Int32(bitPattern: windowID)
-        guard let cfNum = CFNumberCreate(nil, .sInt32Type, &wid) else { return [] }
-        let arr = [cfNum] as CFArray
-        // kCGSAllSpacesMask = 7
-        guard let spaces = copyWinSpaces(cidFn(), 7, arr) as? [NSNumber] else { return [] }
-        return spaces.map { $0.uint64Value }
     }
 
     /// Reads the minimum frame size an app declared to WindowServer for `windowID`,

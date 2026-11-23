@@ -15,7 +15,7 @@ struct MenuBarPopoverView: View {
                 accessibilityBanner
             }
 
-            if !windowManager.activeLayoutLeaves.isEmpty, windowManager.activeDisplayBounds.width > 1 {
+            if !windowManager.activeMinimapTiles.isEmpty, windowManager.activeDisplayBounds.width > 1 {
                 layoutMiniMap
             }
 
@@ -121,7 +121,7 @@ struct MenuBarPopoverView: View {
                         .buttonStyle(.borderless)
                         .font(.caption)
                     }
-                    if windowManager.activeLayoutLeaves.contains(where: { !$0.isEmpty }) {
+                    if windowManager.activeMinimapTiles.contains(where: { !$0.isEmpty }) {
                         Button("Clear") {
                             windowManager.resetCurrentSpaceLayout()
                         }
@@ -141,15 +141,14 @@ struct MenuBarPopoverView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.primary.opacity(0.05))
 
-                    ForEach(windowManager.activeLayoutLeaves, id: \.leafID) { leaf in
-                        let rx = (leaf.frame.minX - bounds.minX) * sx
-                        let ry = (leaf.frame.minY - bounds.minY) * sy
-                        let rw = max(4, leaf.frame.width * sx - 2)
-                        let rh = max(4, leaf.frame.height * sy - 2)
+                    ForEach(windowManager.activeMinimapTiles) { tile in
+                        let rx = (tile.frame.minX - bounds.minX) * sx
+                        let ry = (tile.frame.minY - bounds.minY) * sy
+                        let rw = max(4, tile.frame.width * sx - 2)
+                        let rh = max(4, tile.frame.height * sy - 2)
 
-                        if let wid = leaf.windowID {
-                            let info = windowManager.appInfo(for: wid)
-                            let isHovered = hoveredLeafID == leaf.leafID
+                        if let wid = tile.windowID {
+                            let isHovered = hoveredLeafID == tile.id
                             let iconSize = min(22, max(12, min(rw, rh) - 8))
 
                             ZStack {
@@ -162,7 +161,7 @@ struct MenuBarPopoverView: View {
                                                 lineWidth: isHovered ? 1.25 : 1
                                             )
                                     )
-                                if let icon = info?.icon, rw >= 18, rh >= 18 {
+                                if let icon = tile.appIcon, rw >= 18, rh >= 18 {
                                     Image(nsImage: icon)
                                         .resizable()
                                         .interpolation(.high)
@@ -177,9 +176,9 @@ struct MenuBarPopoverView: View {
                                 windowManager.focusWindow(wid)
                             }
                             .onHover { hovering in
-                                hoveredLeafID = hovering ? leaf.leafID : (hoveredLeafID == leaf.leafID ? nil : hoveredLeafID)
+                                hoveredLeafID = hovering ? tile.id : (hoveredLeafID == tile.id ? nil : hoveredLeafID)
                             }
-                            .help(info?.appName.map { "Focus \($0)" } ?? "Focus Window")
+                            .help(tile.appName.map { "Focus \($0)" } ?? "Focus Window")
                             .offset(x: rx + 1, y: ry + 1)
                         } else {
                             RoundedRectangle(cornerRadius: 3)

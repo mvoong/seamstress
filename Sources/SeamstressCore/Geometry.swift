@@ -77,7 +77,39 @@ public enum CoordinateSpace {
     }
 }
 
+public extension CGPoint {
+    /// Coordinate along `axis` (`x` for vertical splits, `y` for horizontal splits).
+    func coordinate(along axis: SplitAxis) -> CGFloat {
+        axis == .vertical ? x : y
+    }
+}
+
+public extension CGSize {
+    /// Dimension along `axis` (`width` for vertical splits, `height` for horizontal splits).
+    func span(along axis: SplitAxis) -> CGFloat {
+        axis == .vertical ? width : height
+    }
+}
+
 public extension CGRect {
+    /// Leading coordinate along `axis` (`minX` for vertical splits, `minY` for horizontal splits).
+    func start(along axis: SplitAxis) -> CGFloat {
+        axis == .vertical ? minX : minY
+    }
+
+    /// Length along `axis` (`width` for vertical splits, `height` for horizontal splits).
+    func span(along axis: SplitAxis) -> CGFloat {
+        axis == .vertical ? width : height
+    }
+
+    /// L1 distance across origin and size components (used to detect post-apply window drift).
+    func manhattanDistance(to other: CGRect) -> CGFloat {
+        abs(origin.x - other.origin.x)
+            + abs(origin.y - other.origin.y)
+            + abs(width - other.width)
+            + abs(height - other.height)
+    }
+
     /// Split this rect flush (0px gap) along `axis` at `ratio` in (0, 1).
     /// Rounds the seam coordinate to an integer point so adjacent windows never
     /// have a 1pt overlap or 1pt sliver gap.

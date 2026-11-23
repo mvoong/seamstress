@@ -125,7 +125,7 @@ public enum DropPlanner {
             if let edge = edgeBandHit(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
                 let winMin = draggedMinForAxis(edge.axis)
                 let emptyMin = SeamGeometry.defaultMinLeafDimension
-                let parentLength = edge.axis == .vertical ? cell.width : cell.height
+                let parentLength = cell.span(along: edge.axis)
                 let firstMin = edge.isFirstChild ? winMin : emptyMin
                 let secondMin = edge.isFirstChild ? emptyMin : winMin
                 if let ratio = feasibleSplitRatio(
@@ -158,7 +158,7 @@ public enum DropPlanner {
             if let edge = edgeBandHit(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
                 let winMin = draggedMinForAxis(edge.axis)
                 let emptyMin = SeamGeometry.defaultMinLeafDimension
-                let parentLength = edge.axis == .vertical ? cell.width : cell.height
+                let parentLength = cell.span(along: edge.axis)
                 let firstMin = edge.isFirstChild ? winMin : emptyMin
                 let secondMin = edge.isFirstChild ? emptyMin : winMin
                 if let ratio = feasibleSplitRatio(
@@ -215,7 +215,7 @@ public enum DropPlanner {
             along: edge.axis,
             minSizes: minSizes
         )
-        let effectiveLength = edge.axis == .vertical ? effectiveCell.width : effectiveCell.height
+        let effectiveLength = effectiveCell.span(along: edge.axis)
         let firstMin = edge.isFirstChild ? draggedMin : occupantMin
         let secondMin = edge.isFirstChild ? occupantMin : draggedMin
 
@@ -276,15 +276,32 @@ public enum DropPlanner {
         let effectiveBounds: CGRect
         let existingNode: LayoutTree.Node?
         if let oldLeafID = tree.leafID(for: draggedWindowID) {
+            // If `oldLeafID` is a direct child of `tHit.nodeID`, collapsing it promotes its sibling
+            // into `tHit.nodeID`'s slot; capture that sibling's ID before collapsing so nested
+            // T-junctions evaluate the promoted sibling rather than the whole root tree.
+            let promotedSiblingID: NodeID?
+            if case .split(_, _, _, let first, let second) = tree.node(withID: tHit.nodeID) {
+                if first.id == oldLeafID {
+                    promotedSiblingID = second.id
+                } else if second.id == oldLeafID {
+                    promotedSiblingID = first.id
+                } else {
+                    promotedSiblingID = nil
+                }
+            } else {
+                promotedSiblingID = nil
+            }
+
             var collapsed = tree
             collapsed.removeLeafAndCollapse(leafID: oldLeafID)
             if let survivingNode = collapsed.node(withID: tHit.nodeID) {
                 existingNode = survivingNode
                 effectiveBounds = nodeBounds(of: tHit.nodeID, in: collapsed.root, bounds: screenBounds) ?? tHit.containerBounds
+            } else if let siblingID = promotedSiblingID, let siblingNode = collapsed.node(withID: siblingID) {
+                existingNode = siblingNode
+                effectiveBounds = nodeBounds(of: siblingID, in: collapsed.root, bounds: screenBounds) ?? tHit.containerBounds
             } else {
-                // Dragged window was inside this T-junction split; collapsing it promotes its sibling
-                // to occupy the container.
-                existingNode = collapsed.root
+                existingNode = nil
                 effectiveBounds = tHit.containerBounds
             }
         } else {
@@ -300,7 +317,7 @@ public enum DropPlanner {
         let containerMin = existingNode.map {
             SeamGeometry.minimumExtent(of: $0, along: tHit.edge.axis, minSizes: minSizes)
         } ?? SeamGeometry.defaultMinLeafDimension
-        let length = tHit.edge.axis == .vertical ? effectiveBounds.width : effectiveBounds.height
+        let length = effectiveBounds.span(along: tHit.edge.axis)
         let firstMin = tHit.edge.isFirstChild ? draggedMin : containerMin
         let secondMin = tHit.edge.isFirstChild ? containerMin : draggedMin
         return feasibleSplitRatio(parentLength: length, firstMinPx: firstMin, secondMinPx: secondMin)

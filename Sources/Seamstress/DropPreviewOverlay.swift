@@ -3,12 +3,8 @@ import CoreGraphics
 import QuartzCore
 import SeamstressCore
 
-private final class ClickThroughPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
-
 /// Zero-latency borderless click-through frosted-glass overlay showing the snap-drag target zone.
+@MainActor
 final class DropPreviewOverlay {
     private var panel: NSPanel?
     private var visualEffectView: NSVisualEffectView?
@@ -107,10 +103,12 @@ final class DropPreviewOverlay {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().alphaValue = 0
             }, completionHandler: { [weak self] in
-                guard let self, self.hideToken == token else { return }
-                self.isHiding = false
-                panel.orderOut(nil)
-                panel.alphaValue = 1
+                MainActor.assumeIsolated {
+                    guard let self, self.hideToken == token else { return }
+                    self.isHiding = false
+                    panel.orderOut(nil)
+                    panel.alphaValue = 1
+                }
             })
         } else {
             isHiding = false
@@ -149,20 +147,7 @@ final class DropPreviewOverlay {
     }
 
     private func makePanel() -> NSPanel {
-        let p = ClickThroughPanel(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
-        p.isFloatingPanel = true
-        p.level = .floating
-        p.backgroundColor = .clear
-        p.isOpaque = false
-        p.hasShadow = false
-        p.ignoresMouseEvents = true
-        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        p.animationBehavior = .none
+        let p = OverlayPanel.make(level: .floating)
 
         let vfx = NSVisualEffectView(frame: .zero)
         vfx.material = .hudWindow

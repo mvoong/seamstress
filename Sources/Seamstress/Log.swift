@@ -6,5 +6,4 @@ enum SeamstressLog {
 
     static let lifecycle = Logger(subsystem: subsystem, category: "lifecycle")
     static let layout = Logger(subsystem: subsystem, category: "layout")
-    static let ax = Logger(subsystem: subsystem, category: "ax")
 }

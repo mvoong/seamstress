@@ -31,6 +31,7 @@ struct WindowAppInfo: Equatable {
 final class AXWindowBridge {
     private let lock = NSLock()
     private var elementCache: [WindowID: (pid: pid_t, element: AXUIElement)] = [:]
+    private var tileableCache: Set<WindowID> = []
     private var lastAppliedFrames: [WindowID: CGRect] = [:]
     private var pidQueues: [pid_t: DispatchQueue] = [:]
     private var pidCoalescers: [pid_t: PerPIDFrameCoalescer] = [:]
@@ -159,19 +160,20 @@ final class AXWindowBridge {
         }
     }
 
-    func register(windowID: WindowID, pid: pid_t, element: AXUIElement? = nil) {
-        if let element {
-            lock.lock()
-            elementCache[windowID] = (pid, element)
-            lock.unlock()
-        } else {
-            _ = resolveElement(windowID: windowID, pid: pid)
+    func registerAsync(windowID: WindowID, pid: pid_t) {
+        lock.lock()
+        let alreadyCached = elementCache[windowID]?.pid == pid
+        lock.unlock()
+        guard !alreadyCached else { return }
+        queue(for: pid).async { [weak self] in
+            _ = self?.resolveElement(windowID: windowID, pid: pid)
         }
     }
 
     func forget(windowID: WindowID) {
         lock.lock()
         elementCache.removeValue(forKey: windowID)
+        tileableCache.remove(windowID)
         lastAppliedFrames.removeValue(forKey: windowID)
         lock.unlock()
     }
@@ -182,6 +184,7 @@ final class AXWindowBridge {
         let deadIDs = elementCache.compactMap { $0.value.pid == pid ? $0.key : nil }
         for wid in deadIDs {
             elementCache.removeValue(forKey: wid)
+            tileableCache.remove(wid)
             lastAppliedFrames.removeValue(forKey: wid)
         }
         pidQueues.removeValue(forKey: pid)
@@ -229,8 +232,16 @@ final class AXWindowBridge {
         case unavailable
     }
 
+    /// Fast O(1) check whether `windowID` was already verified as a standard tileable window.
+    func isKnownTileable(windowID: WindowID, pid: pid_t) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return tileableCache.contains(windowID) && elementCache[windowID]?.pid == pid
+    }
+
     /// Check if a window is a standard resizable window (skipping sheets, popovers, system dialogs),
     /// distinguishing definitive non-standard windows from transient AX timeouts/unavailability.
+    /// Runs synchronously on the caller's queue; call from a PID queue or background queue.
     func checkTileability(windowID: WindowID, pid: pid_t, timeout: Float = AXWindowBridge.axTimeout) -> TileabilityResult {
         guard let el = resolveElement(windowID: windowID, pid: pid, timeout: timeout) else {
             return .unavailable
@@ -256,20 +267,81 @@ final class AXWindowBridge {
            !resizable.boolValue {
             return .nonStandard
         }
+
+        lock.lock()
+        tileableCache.insert(windowID)
+        lock.unlock()
         return .tileable
     }
 
-    /// Check if a window is a standard resizable window (skipping sheets, popovers, system dialogs).
-    func isStandardTileableWindow(windowID: WindowID, pid: pid_t) -> Bool {
-        checkTileability(windowID: windowID, pid: pid) == .tileable
+    /// Asynchronously verify whether `(windowID, pid)` is a standard resizable window off the main thread.
+    func checkTileabilityAsync(
+        windowID: WindowID,
+        pid: pid_t,
+        timeout: Float = AXWindowBridge.axTimeout,
+        completion: @escaping @MainActor (TileabilityResult) -> Void
+    ) {
+        if isKnownTileable(windowID: windowID, pid: pid) {
+            DispatchQueue.main.async {
+                completion(.tileable)
+            }
+            return
+        }
+        queue(for: pid).async { [weak self] in
+            guard let self else { return }
+            let result = self.checkTileability(windowID: windowID, pid: pid, timeout: timeout)
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
     }
 
-    /// Read current AX frame (or fallback to CG bounds).
-    func readAXFrame(windowID: WindowID, pid: pid_t) -> CGRect? {
-        guard let el = resolveElement(windowID: windowID, pid: pid) else {
-            return windowBounds(windowID: windowID)
+    /// Asynchronously verify tileability for a batch of windows across their per-PID queues
+    /// (zero main-thread AX IPC; a slow app cannot stall checks for other apps).
+    func checkTileabilityBatchAsync(
+        _ targets: [(windowID: WindowID, pid: pid_t)],
+        timeout: Float = 0.6,
+        completion: @escaping @MainActor ([WindowID: TileabilityResult]) -> Void
+    ) {
+        guard !targets.isEmpty else {
+            DispatchQueue.main.async { completion([:]) }
+            return
         }
-        return Self.readFrame(of: el) ?? windowBounds(windowID: windowID)
+        var byPID: [pid_t: [WindowID]] = [:]
+        for target in targets {
+            byPID[target.pid, default: []].append(target.windowID)
+        }
+
+        let resultsLock = NSLock()
+        var results: [WindowID: TileabilityResult] = [:]
+        let group = DispatchGroup()
+
+        for (pid, wids) in byPID {
+            group.enter()
+            queue(for: pid).async { [weak self] in
+                defer { group.leave() }
+                guard let self else { return }
+                var local: [(WindowID, TileabilityResult)] = []
+                for wid in wids {
+                    let res = self.checkTileability(windowID: wid, pid: pid, timeout: timeout)
+                    local.append((wid, res))
+                }
+                resultsLock.lock()
+                for (wid, res) in local {
+                    results[wid] = res
+                }
+                resultsLock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            resultsLock.lock()
+            let snapshot = results
+            resultsLock.unlock()
+            MainActor.assumeIsolated {
+                completion(snapshot)
+            }
+        }
     }
 
     // MARK: - Live resize batching (AXEnhancedUserInterface + per-PID coalescing)
@@ -347,7 +419,7 @@ final class AXWindowBridge {
     func applyFrames(
         _ frames: [WindowID: CGRect],
         crossMonitorSafe: Bool = true,
-        completion: (() -> Void)? = nil
+        completion: (@MainActor () -> Void)? = nil
     ) {
         var grouped: [pid_t: [(WindowID, CGRect)]] = [:]
         for (wid, frame) in frames {
@@ -356,7 +428,9 @@ final class AXWindowBridge {
         }
 
         guard !grouped.isEmpty else {
-            completion?()
+            if let completion {
+                DispatchQueue.main.async { completion() }
+            }
             return
         }
 
@@ -378,7 +452,11 @@ final class AXWindowBridge {
         }
 
         if let completion {
-            group.notify(queue: .main, execute: completion)
+            group.notify(queue: .main) {
+                MainActor.assumeIsolated {
+                    completion()
+                }
+            }
         }
     }
 
@@ -467,24 +545,6 @@ final class AXWindowBridge {
                 forget(windowID: windowID)
             }
         }
-    }
-
-    private static func readFrame(of element: AXUIElement) -> CGRect? {
-        var posObj: AnyObject?
-        var sizeObj: AnyObject?
-        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posObj) == .success,
-              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeObj) == .success,
-              let posVal = posObj, let sizeVal = sizeObj,
-              CFGetTypeID(posVal) == AXValueGetTypeID(),
-              CFGetTypeID(sizeVal) == AXValueGetTypeID() else {
-            return nil
-        }
-        var pos = CGPoint.zero
-        var size = CGSize.zero
-        AXValueGetValue(posVal as! AXValue, .cgPoint, &pos)
-        AXValueGetValue(sizeVal as! AXValue, .cgSize, &size)
-        guard pos.x.isFinite, pos.y.isFinite, size.width.isFinite, size.height.isFinite else { return nil }
-        return CGRect(origin: pos, size: size)
     }
 
     private func disableEnhancedUIIfNeeded(pid: pid_t) -> Bool {

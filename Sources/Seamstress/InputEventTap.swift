@@ -24,31 +24,34 @@ final class InputEventTap {
         flags.contains([.maskControl, .maskCommand])
     }
 
-    var onHoverCandidateChanged: ((_ hit: SeamHit?, _ point: CGPoint) -> Void)?
-    var onHoverCursorReassert: (() -> Void)?
+    var onHoverCandidateChanged: (@MainActor (_ hit: SeamHit?, _ point: CGPoint) -> Void)?
+    var onHoverCursorReassert: (@MainActor () -> Void)?
     /// Synchronous fast Z-order check used on `leftMouseDown` if the user clicks a seam
-    /// before the async hover check has landed on main.
+    /// before the async hover check has landed on main. Runs on the EventTap thread.
     var isSeamHitUnoccludedSync: ((_ hit: SeamHit, _ point: CGPoint) -> Bool)?
     /// Synchronous WindowServer hit-test used on Option+`leftMouseDown` to avoid macOS hiding
     /// the previously focused app when clicking an unfocused tiled window (or clicking away from one).
+    /// Runs on the EventTap thread.
     var topWindowAtPointSync: ((_ point: CGPoint) -> (windowID: WindowID, ownerPID: pid_t)?)?
-    var onSeamDragBegin: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
-    var onSeamDragMove: ((_ hit: SeamHit, _ point: CGPoint, _ shiftDown: Bool) -> Void)?
-    var onSeamDragEnd: ((_ hit: SeamHit, _ point: CGPoint) -> Void)?
-    var onSeamDragCancel: (() -> Void)?
-    var onSeamShiftChangedDuringDrag: ((_ shiftDown: Bool, _ point: CGPoint) -> Void)?
-    var onSeamDoubleClick: ((_ hit: SeamHit) -> Void)?
+    var onSeamDragBegin: (@MainActor (_ hit: SeamHit, _ point: CGPoint) -> Void)?
+    var onSeamDragMove: (@MainActor (_ hit: SeamHit, _ point: CGPoint, _ shiftDown: Bool) -> Void)?
+    var onSeamDragEnd: (@MainActor (_ hit: SeamHit, _ point: CGPoint) -> Void)?
+    var onSeamDragCancel: (@MainActor () -> Void)?
+    var onSeamShiftChangedDuringDrag: (@MainActor (_ shiftDown: Bool, _ point: CGPoint) -> Void)?
+    var onSeamDoubleClick: (@MainActor (_ hit: SeamHit) -> Void)?
 
-    var onWindowMouseDown: ((_ point: CGPoint, _ snapModifierDown: Bool, _ isGestureDrag: Bool) -> Void)?
-    var onWindowMouseDragged: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
-    var onWindowMouseUp: ((_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
-    var onWindowDragCancel: (() -> Void)?
-    var onSnapModifierChangedDuringDrag: ((_ snapModifierDown: Bool, _ point: CGPoint) -> Void)?
+    var onWindowMouseDown: (@MainActor (_ point: CGPoint, _ snapModifierDown: Bool, _ isGestureDrag: Bool) -> Void)?
+    var onWindowMouseDragged: (@MainActor (_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
+    var onWindowMouseUp: (@MainActor (_ point: CGPoint, _ snapModifierDown: Bool) -> Void)?
+    var onWindowDragCancel: (@MainActor () -> Void)?
+    var onSnapModifierChangedDuringDrag: (@MainActor (_ snapModifierDown: Bool, _ point: CGPoint) -> Void)?
 
     private let lock = NSLock()
     private var visibleSeams: [VisibleSeam] = []
     private var tiledWindowIDs: Set<WindowID> = []
     private var tiledPIDs: Set<pid_t> = []
+    private var frontmostPID: pid_t?
+    private var lastMouseLocation: CGPoint = .zero
     private var unoccludedHit: SeamHit?
     private var lastHoverIdentity: String?
     private var lastHoverNotifyPoint: CGPoint = .zero
@@ -97,6 +100,14 @@ final class InputEventTap {
         lock.lock()
         tiledWindowIDs = windowIDs
         tiledPIDs = pids
+        lock.unlock()
+    }
+
+    /// Called from main thread whenever the frontmost application changes (avoids touching
+    /// `NSWorkspace.shared` from the background EventTap thread).
+    func updateFrontmostPID(_ pid: pid_t?) {
+        lock.lock()
+        frontmostPID = pid
         lock.unlock()
     }
 
@@ -253,11 +264,14 @@ final class InputEventTap {
             if isLeftMouseDown && hasActiveWindowMove {
                 hasActiveWindowMove = false
                 swallowingCancelledWindowDrag = true
+                let fallbackPoint = lastMouseLocation
                 lock.unlock()
 
                 // Terminate macOS's native window-drag loop immediately so the window
                 // snaps back to its pre-drag frame while the user still holds the mouse button.
-                let cursorPoint = event.location
+                // Keyboard CGEvents don't reliably carry the live cursor coordinate, so query the
+                // current pointer position (falling back to the last observed mouse location).
+                let cursorPoint = CGEvent(source: nil)?.location ?? fallbackPoint
                 if let syntheticUp = CGEvent(
                     mouseEventSource: nil,
                     mouseType: .leftMouseUp,
@@ -283,6 +297,7 @@ final class InputEventTap {
         switch type {
         case .mouseMoved:
             lock.lock()
+            lastMouseLocation = point
             let dragging = activeSeamDrag != nil || isLeftMouseDown
             let seams = visibleSeams
             let prevID = lastHoverIdentity
@@ -375,9 +390,11 @@ final class InputEventTap {
                 }
             }
             isLeftMouseDown = true
+            lastMouseLocation = point
             lastSnapModifierDown = snapModifierDown
             let currentTiledWindowIDs = tiledWindowIDs
             let currentTiledPIDs = tiledPIDs
+            let currentFrontmostPID = frontmostPID
             lock.unlock()
 
             let originalFlags = event.flags
@@ -389,13 +406,13 @@ final class InputEventTap {
                !originalFlags.contains(.maskCommand),
                !originalFlags.contains(.maskControl),
                (!currentTiledWindowIDs.isEmpty || !currentTiledPIDs.isEmpty),
+               let currentFrontmostPID,
                let top = topWindowAtPointSync?(point),
-               let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier,
                OptionClickPolicy.shouldStripOptionOnMouseDown(
                    flags: originalFlags,
                    clickedWindowID: top.windowID,
                    clickedOwnerPID: top.ownerPID,
-                   frontmostPID: frontmostPID,
+                   frontmostPID: currentFrontmostPID,
                    tiledWindowIDs: currentTiledWindowIDs,
                    tiledPIDs: currentTiledPIDs
                ) {
@@ -410,6 +427,7 @@ final class InputEventTap {
         case .leftMouseDragged:
             let shiftDown = event.flags.contains(.maskShift)
             lock.lock()
+            lastMouseLocation = point
             if swallowingDoubleClickUp || swallowingCancelledSeamDrag || swallowingCancelledWindowDrag {
                 lock.unlock()
                 return nil

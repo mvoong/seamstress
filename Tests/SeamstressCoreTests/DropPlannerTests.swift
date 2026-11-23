@@ -299,4 +299,33 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(verticalSplitAttempt?.previewKind, .split)
         XCTAssertLessThanOrEqual(verticalSplitAttempt?.previewRect.height ?? 999, 950 - 512 + 1)
     }
+
+    func testNestedTJunctionIgnoresMinSizeOfWindowsOutsideContainer() {
+        // Layout: [10 (left 500x800) | (20 top-right 500x400 / 30 bottom-right 500x400)]
+        // Window 10 (outside the nested right split) has a huge minWidth (600px).
+        // Dragging window 20 onto the right T-junction of its own nested [20 / 30] container
+        // collapses [20 / 30] to just [30] inside the 500px right column; splitting [30]
+        // vertically with 20 (minWidth 200 each -> 400 <= 500) must succeed without counting 10.
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 10)
+        tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .right, with: 20)
+        tree.splitOccupied(leafID: tree.leafID(for: 20)!, edge: .bottom, with: 30)
+
+        let minSizes: [WindowID: CGSize] = [
+            10: CGSize(width: 600, height: 200),
+            20: CGSize(width: 200, height: 200),
+            30: CGSize(width: 200, height: 200),
+        ]
+
+        let plan = DropPlanner.plan(
+            pointer: CGPoint(x: 980, y: 400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(plan?.previewKind, .splitContainer)
+        XCTAssertEqual(plan?.previewRect, CGRect(x: 750, y: 0, width: 250, height: 800))
+    }
 }
