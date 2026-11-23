@@ -93,4 +93,61 @@ final class LayoutReconstructorTests: XCTestCase {
         XCTAssertNotNil(tree)
         XCTAssertEqual(Set(tree?.allWindowIDs ?? []), [1, 2, 3, 4])
     }
+
+    func testIgnoresFloatingWindowSandwichedVerticallyInEmptyColumn() {
+        let ultrawide = CGRect(x: 0, y: 30, width: 3440, height: 1410)
+        let windows = [
+            // Floating window matching column width but with empty gaps above and below
+            WindowCandidate(windowID: 10, frame: CGRect(x: 0, y: 182, width: 860, height: 1087)),
+            // Two genuinely tiled windows covering the remaining 75%
+            WindowCandidate(windowID: 2, frame: CGRect(x: 860, y: 30, width: 860, height: 1410)),
+            WindowCandidate(windowID: 3, frame: CGRect(x: 1720, y: 30, width: 1720, height: 1410)),
+        ]
+        let tree = LayoutReconstructor.reconstruct(windows: windows, in: ultrawide)
+        XCTAssertNotNil(tree)
+        XCTAssertEqual(Set(tree?.allWindowIDs ?? []), [2, 3])
+        XCTAssertFalse(tree!.contains(windowID: 10))
+
+        let emptyLeaves = tree!.leafPlacements(in: ultrawide).filter(\.isEmpty)
+        XCTAssertEqual(emptyLeaves.count, 1)
+        XCTAssertEqual(emptyLeaves[0].frame, CGRect(x: 0, y: 30, width: 860, height: 1410))
+    }
+
+    func testIgnoresFloatingWindowCenteredOrCorneredInsideEmptyColumn() {
+        let ultrawide = CGRect(x: 0, y: 30, width: 3440, height: 1410)
+        let tiled = [
+            WindowCandidate(windowID: 2, frame: CGRect(x: 860, y: 30, width: 860, height: 1410)),
+            WindowCandidate(windowID: 3, frame: CGRect(x: 1720, y: 30, width: 1720, height: 1410)),
+        ]
+
+        // Floating window centered inside the empty left column (gaps on all 4 sides)
+        let centeredTree = LayoutReconstructor.reconstruct(
+            windows: [WindowCandidate(windowID: 10, frame: CGRect(x: 100, y: 200, width: 660, height: 900))] + tiled,
+            in: ultrawide
+        )
+        XCTAssertNotNil(centeredTree)
+        XCTAssertEqual(Set(centeredTree?.allWindowIDs ?? []), [2, 3])
+
+        // Floating window tucked into the top-left corner of the empty left column (gaps on 2 adjacent sides)
+        let cornerTree = LayoutReconstructor.reconstruct(
+            windows: [WindowCandidate(windowID: 11, frame: CGRect(x: 0, y: 30, width: 620, height: 820))] + tiled,
+            in: ultrawide
+        )
+        XCTAssertNotNil(cornerTree)
+        XCTAssertEqual(Set(cornerTree?.allWindowIDs ?? []), [2, 3])
+    }
+
+    func testStillReconstructsTiledLayoutWithVacatedQuarterSlot() {
+        // Left half occupied; right half has top empty and bottom occupied (3 edges flush)
+        let windows = [
+            WindowCandidate(windowID: 1, frame: CGRect(x: 0, y: 25, width: 800, height: 975)),
+            WindowCandidate(windowID: 2, frame: CGRect(x: 800, y: 513, width: 800, height: 487)),
+        ]
+        let tree = LayoutReconstructor.reconstruct(windows: windows, in: screen)
+        XCTAssertNotNil(tree)
+        XCTAssertEqual(Set(tree?.allWindowIDs ?? []), [1, 2])
+        let emptyLeaves = tree!.leafPlacements(in: screen).filter(\.isEmpty)
+        XCTAssertEqual(emptyLeaves.count, 1)
+        XCTAssertEqual(emptyLeaves[0].frame, CGRect(x: 800, y: 25, width: 800, height: 488))
+    }
 }

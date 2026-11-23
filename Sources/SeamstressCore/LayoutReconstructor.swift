@@ -29,7 +29,7 @@ public enum LayoutReconstructor {
         guard bounds.width >= 200, bounds.height >= 200 else { return nil }
 
         // Keep only windows that sit substantially inside `bounds` and are large enough to be tiles.
-        let eligible = windows.filter { w in
+        var eligible = windows.filter { w in
             w.frame.width >= 100 &&
             w.frame.height >= 100 &&
             w.frame.minX >= bounds.minX - tolerance &&
@@ -39,21 +39,45 @@ public enum LayoutReconstructor {
         }
         guard !eligible.isEmpty else { return nil }
 
+        // Iteratively solve and prune any adopted window that has fewer than 3 anchored edges
+        // (touching the screen boundary or another adopted window). This prevents floating windows
+        // sitting in an empty region (e.g. tucked in a corner or centered vertically) from being
+        // falsely adopted by carving empty strips around them.
         var nextID: NodeID = 1
-        func allocID() -> NodeID {
-            defer { nextID += 1 }
-            return nextID
+        var best: Solution
+        while true {
+            nextID = 1
+            func allocID() -> NodeID {
+                defer { nextID += 1 }
+                return nextID
+            }
+
+            best = solve(
+                region: bounds,
+                candidates: eligible,
+                depth: 0,
+                tolerance: tolerance,
+                allocID: allocID
+            )
+
+            guard best.windowCount > 0 else { return nil }
+
+            let adoptedIDs = Set(best.node.windowIDs())
+            let adoptedCandidates = eligible.filter { adoptedIDs.contains($0.windowID) }
+            let unanchoredIDs = Set(adoptedCandidates.compactMap { candidate in
+                anchoredEdgeCount(
+                    for: candidate,
+                    among: adoptedCandidates,
+                    in: bounds,
+                    tolerance: tolerance
+                ) < 3 ? candidate.windowID : nil
+            })
+            if unanchoredIDs.isEmpty {
+                break
+            }
+            eligible.removeAll { unanchoredIDs.contains($0.windowID) }
+            guard !eligible.isEmpty else { return nil }
         }
-
-        let best = solve(
-            region: bounds,
-            candidates: eligible,
-            depth: 0,
-            tolerance: tolerance,
-            allocID: allocID
-        )
-
-        guard best.windowCount > 0 else { return nil }
 
         let totalArea = bounds.width * bounds.height
         let coverage = best.coveredArea / totalArea
@@ -88,6 +112,7 @@ public enum LayoutReconstructor {
         let coveredArea: CGFloat
         let windowCount: Int
         let maxSplitDepth: Int
+        let hasEmpty: Bool
     }
 
     private static func solve(
@@ -103,12 +128,13 @@ public enum LayoutReconstructor {
                 node: .window(id: allocID(), windowID: match.windowID),
                 coveredArea: region.width * region.height,
                 windowCount: 1,
-                maxSplitDepth: 0
+                maxSplitDepth: 0,
+                hasEmpty: false
             )
         }
 
         guard depth < maxDepth, !candidates.isEmpty else {
-            return Solution(node: .empty(id: allocID()), coveredArea: 0, windowCount: 0, maxSplitDepth: 0)
+            return Solution(node: .empty(id: allocID()), coveredArea: 0, windowCount: 0, maxSplitDepth: 0, hasEmpty: true)
         }
 
         // Collect unique candidate vertical (X) and horizontal (Y) cut coordinates from window edges.
@@ -162,8 +188,18 @@ public enum LayoutReconstructor {
             let combinedCount = solFirst.windowCount + solSecond.windowCount
             guard combinedCount > 0 else { return }
 
+            let firstEmpty = solFirst.windowCount == 0
+            let secondEmpty = solSecond.windowCount == 0
+            // Never wrap a subtree that already contains an empty slot inside another empty-sided
+            // cut. Otherwise a floating window sitting inside an empty region gets falsely adopted
+            // by carving 2–4 phantom empty strips around it (e.g. empty above and empty below).
+            if (firstEmpty && solSecond.hasEmpty) || (secondEmpty && solFirst.hasEmpty) {
+                return
+            }
+
             let combinedArea = solFirst.coveredArea + solSecond.coveredArea
             let splitDepth = 1 + max(solFirst.maxSplitDepth, solSecond.maxSplitDepth)
+            let combinedHasEmpty = firstEmpty || secondEmpty || solFirst.hasEmpty || solSecond.hasEmpty
 
             let isBetter: Bool
             if let current = best {
@@ -189,7 +225,8 @@ public enum LayoutReconstructor {
                     ),
                     coveredArea: combinedArea,
                     windowCount: combinedCount,
-                    maxSplitDepth: splitDepth
+                    maxSplitDepth: splitDepth,
+                    hasEmpty: combinedHasEmpty
                 )
             }
         }
@@ -197,7 +234,7 @@ public enum LayoutReconstructor {
         for x in vCuts { evaluateCut(axis: .vertical, cutCoord: x) }
         for y in hCuts { evaluateCut(axis: .horizontal, cutCoord: y) }
 
-        return best ?? Solution(node: .empty(id: allocID()), coveredArea: 0, windowCount: 0, maxSplitDepth: 0)
+        return best ?? Solution(node: .empty(id: allocID()), coveredArea: 0, windowCount: 0, maxSplitDepth: 0, hasEmpty: true)
     }
 
     private static func matchesAllFourEdges(_ frame: CGRect, _ region: CGRect, tolerance: CGFloat) -> Bool {
@@ -205,6 +242,40 @@ public enum LayoutReconstructor {
         abs(frame.maxX - region.maxX) <= tolerance &&
         abs(frame.minY - region.minY) <= tolerance &&
         abs(frame.maxY - region.maxY) <= tolerance
+    }
+
+    /// Counts how many of `candidate`'s 4 edges are anchored to either `bounds` (screen edge)
+    /// or another adopted window's opposing edge with meaningful overlap.
+    private static func anchoredEdgeCount(
+        for candidate: WindowCandidate,
+        among peers: [WindowCandidate],
+        in bounds: CGRect,
+        tolerance: CGFloat
+    ) -> Int {
+        let f = candidate.frame
+        let others = peers.filter { $0.windowID != candidate.windowID }
+
+        let leftAnchored = abs(f.minX - bounds.minX) <= tolerance || others.contains { o in
+            abs(o.frame.maxX - f.minX) <= tolerance &&
+            min(f.maxY, o.frame.maxY) - max(f.minY, o.frame.minY) > tolerance
+        }
+        let rightAnchored = abs(f.maxX - bounds.maxX) <= tolerance || others.contains { o in
+            abs(o.frame.minX - f.maxX) <= tolerance &&
+            min(f.maxY, o.frame.maxY) - max(f.minY, o.frame.minY) > tolerance
+        }
+        let topAnchored = abs(f.minY - bounds.minY) <= tolerance || others.contains { o in
+            abs(o.frame.maxY - f.minY) <= tolerance &&
+            min(f.maxX, o.frame.maxX) - max(f.minX, o.frame.minX) > tolerance
+        }
+        let bottomAnchored = abs(f.maxY - bounds.maxY) <= tolerance || others.contains { o in
+            abs(o.frame.minY - f.maxY) <= tolerance &&
+            min(f.maxX, o.frame.maxX) - max(f.minX, o.frame.minX) > tolerance
+        }
+
+        return (leftAnchored ? 1 : 0)
+            + (rightAnchored ? 1 : 0)
+            + (topAnchored ? 1 : 0)
+            + (bottomAnchored ? 1 : 0)
     }
 
     private static func isContained(_ frame: CGRect, in region: CGRect, tolerance: CGFloat) -> Bool {
