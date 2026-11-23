@@ -33,6 +33,8 @@ final class AXWindowBridge {
     private var elementCache: [WindowID: (pid: pid_t, element: AXUIElement)] = [:]
     private var tileableCache: Set<WindowID> = []
     private var lastAppliedFrames: [WindowID: CGRect] = [:]
+    private var appKeyByPID: [pid_t: AppKey] = [:]
+    private var appKeyByWindowID: [WindowID: AppKey] = [:]
     private var pidQueues: [pid_t: DispatchQueue] = [:]
     private var pidCoalescers: [pid_t: PerPIDFrameCoalescer] = [:]
     private var batchEnhancedRestore: [pid_t: Bool] = [:]
@@ -130,6 +132,55 @@ final class AXWindowBridge {
         return onScreenNormalWindows().first(where: { $0.windowID == windowID })?.ownerPID
     }
 
+    /// Stable cross-launch application key for quit/relaunch layout history.
+    static func appKey(for app: NSRunningApplication) -> AppKey? {
+        if let bundleID = app.bundleIdentifier, !bundleID.isEmpty {
+            return "bundle:\(bundleID)"
+        }
+        if let url = app.executableURL ?? app.bundleURL {
+            return "url:\(url.path)"
+        }
+        if let name = app.localizedName, !name.isEmpty {
+            return "name:\(name)"
+        }
+        return nil
+    }
+
+    func cacheAppKey(_ key: AppKey, for pid: pid_t) {
+        lock.lock()
+        appKeyByPID[pid] = key
+        lock.unlock()
+    }
+
+    func appKey(for pid: pid_t) -> AppKey? {
+        lock.lock()
+        let cached = appKeyByPID[pid]
+        lock.unlock()
+        if let cached { return cached }
+        guard let app = NSRunningApplication(processIdentifier: pid),
+              let key = Self.appKey(for: app) else {
+            return nil
+        }
+        lock.lock()
+        appKeyByPID[pid] = key
+        lock.unlock()
+        return key
+    }
+
+    func appKey(for windowID: WindowID) -> AppKey? {
+        lock.lock()
+        let cached = appKeyByWindowID[windowID]
+        lock.unlock()
+        if let cached { return cached }
+        guard let pid = pid(for: windowID), let key = appKey(for: pid) else {
+            return nil
+        }
+        lock.lock()
+        appKeyByWindowID[windowID] = key
+        lock.unlock()
+        return key
+    }
+
     func appInfo(for windowID: WindowID) -> WindowAppInfo? {
         guard let pid = pid(for: windowID) else { return nil }
         let app = NSRunningApplication(processIdentifier: pid)
@@ -175,6 +226,7 @@ final class AXWindowBridge {
         elementCache.removeValue(forKey: windowID)
         tileableCache.remove(windowID)
         lastAppliedFrames.removeValue(forKey: windowID)
+        appKeyByWindowID.removeValue(forKey: windowID)
         lock.unlock()
     }
 
@@ -186,7 +238,9 @@ final class AXWindowBridge {
             elementCache.removeValue(forKey: wid)
             tileableCache.remove(wid)
             lastAppliedFrames.removeValue(forKey: wid)
+            appKeyByWindowID.removeValue(forKey: wid)
         }
+        appKeyByPID.removeValue(forKey: pid)
         pidQueues.removeValue(forKey: pid)
         pidCoalescers.removeValue(forKey: pid)
         batchEnhancedRestore.removeValue(forKey: pid)

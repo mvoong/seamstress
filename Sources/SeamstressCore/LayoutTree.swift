@@ -452,6 +452,24 @@ public struct LayoutTree: Equatable, Sendable {
         return changed
     }
 
+    /// Remove any window IDs in `unmatched` (collapsing their splits) and then substitute
+    /// remaining window IDs according to `replacements` in a single collision-free pass.
+    public mutating func remapWindows(
+        replacements: [WindowID: WindowID],
+        removing unmatched: Set<WindowID> = []
+    ) {
+        for wid in unmatched {
+            removeWindowAndCollapse(wid)
+        }
+        guard !replacements.isEmpty else { return }
+        root = mapNode(root) { node in
+            guard case .window(let id, let wid) = node, let replacement = replacements[wid] else {
+                return node
+            }
+            return .window(id: id, windowID: replacement)
+        }
+    }
+
     // MARK: - Helpers
 
     private static func makeSplit(

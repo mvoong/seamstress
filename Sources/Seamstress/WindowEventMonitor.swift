@@ -10,7 +10,8 @@ import SeamstressCore
 final class WindowEventMonitor {
     var onWindowBecameUnavailable: ((WindowID) -> Void)?
     var onApplicationUnavailable: ((pid_t) -> Void)?
-    var onApplicationTerminated: ((pid_t) -> Void)?
+    var onApplicationTerminated: ((pid_t, AppKey?) -> Void)?
+    var onApplicationLaunched: ((pid_t, AppKey) -> Void)?
     var onFrontmostApplicationChanged: ((pid_t?) -> Void)?
     var onSanitySweep: (() -> Void)?
 
@@ -52,13 +53,29 @@ final class WindowEventMonitor {
             object: nil,
             queue: .main
         ) { [weak self] note in
-            guard let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier else {
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
                 return
             }
+            let pid = app.processIdentifier
+            let appKey = AXWindowBridge.appKey(for: app)
             MainActor.assumeIsolated {
                 self?.removeObserver(for: pid)
-                self?.onApplicationUnavailable?(pid)
-                self?.onApplicationTerminated?(pid)
+                self?.onApplicationTerminated?(pid, appKey)
+            }
+        })
+
+        wsObservers.append(ws.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let appKey = AXWindowBridge.appKey(for: app) else {
+                return
+            }
+            let pid = app.processIdentifier
+            MainActor.assumeIsolated {
+                self?.onApplicationLaunched?(pid, appKey)
             }
         })
 

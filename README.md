@@ -24,7 +24,7 @@ A lightweight, mouse-driven macOS tiling window manager built around floating-by
 | **Release `⌥` / `⌃⌘` mid-drag** | Cancels tiling preview and lets the window drop as floating (detaching a tiled window). |
 | **Normal Drag** (without `⌥` or `⌃⌘`) on a tiled window | Detaches it back to floating, restores its pre-tiled size anchored under the cursor, and expands neighboring windows to fill the gap. Pressing `⌥` or `⌃⌘` within 0.45s of starting restores the layout so you can still swap/re-split. |
 | **Manual Edge Resize** on a tiled window's own edge | Detaches it cleanly and expands neighboring windows so no stale seam stays behind. |
-| **Close / Minimize / Hide / Quit** a tiled window | Automatically collapses its split so neighboring windows expand to fill the vacated space. |
+| **Close / Minimize / Hide / Quit** a tiled window | Automatically collapses its split so neighboring windows expand to fill the vacated space. If an application is **quit**, Seamstress remembers its pre-quit Space layout(s) and automatically restores its slot(s) and split ratios when the app is next launched—as long as the Space hasn't changed in the meantime. |
 | **Hover Seam** (`±5pt` along any flush split line or `┼` intersection) | Shows a subtle hairline + grip handle (or centered `┼` knob at 2-axis intersections) and resize cursor (suppressed whenever a floating window sits in front of the seam). |
 | **Drag Seam / `┼` Intersection** | Resizes all affected windows in real time (1-axis along a seam, or simultaneous 2-axis at a vertical+horizontal intersection), with magnetic detents at 50% / ⅓ / ⅔ and neighboring co-linear seams (hold `⇧` for free positioning), amber clamping cues + Force Touch haptics at real window minimum sizes. |
 | **Drag Seam > 90%** toward an empty slot | Previews and collapses the empty slot on release, expanding the occupied side to 100%. |
@@ -42,7 +42,7 @@ Works passively with both standard titlebar dragging (`⌥` + drag) and macOS dr
 - **`LayoutTree.swift`**: Value-type BSP tree supporting occupied and persistent empty leaves, fill, edge-split, swap, replace, detach-to-empty, auto-collapse on window close, and double-empty cleanup.
 - **`DropPlanner.swift`**: Pure Option-drag hit-testing and drop-zone preview rect computation.
 - **`SeamGeometry.swift`**: Flush `10pt` hit-strip extraction, seam hit-testing, minimum-extent ratio clamping, and `> 90%` empty-slot collapse detection.
-- **`SpaceLayoutStore.swift`**: Manages per-`(displayUUID, nativeSpaceID)` trees, pre-tiled floating frames, and cross-monitor moves/swaps.
+- **`SpaceLayoutStore.swift` & `LayoutHistory.swift`**: Manages per-`(displayUUID, nativeSpaceID)` trees, pre-tiled floating frames, cross-monitor moves/swaps, and per-space layout revision history for restoring quit applications when they relaunch into an unchanged Space.
 - **`LayoutReconstructor.swift`**: Pure guillotine-cut BSP reconstructor that converts existing flush-arranged windows into `LayoutTree`s on launch while ignoring floating windows.
 - **`FrameCoalescer.swift`**: Per-PID latest-frame coalescing state machine for live resizing.
 - **`OptionClickPolicy.swift`**: Strips `⌥` on `leftMouseDown` when Option-clicking an unfocused window involving a tiled layout, preventing macOS's native Option-click-to-hide shortcut from hiding and evicting focused windows.

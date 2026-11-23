@@ -35,6 +35,23 @@ final class WindowManager: ObservableObject {
     private let seamDragController: SeamDragController
     private let windowDragController: WindowDragController
 
+    private struct PendingLaunchRestore {
+        let appKey: AppKey
+        let pid: pid_t
+        let expectedWindowCount: Int
+        let deadline: TimeInterval
+        var firstTileableSeenAt: TimeInterval?
+        var rejectedWindowIDs: Set<WindowID> = []
+        var checkingWindowIDs: Set<WindowID> = []
+        var verifiedTileable: [WindowID: LaunchedWindow] = [:]
+        var pollWorkItem: DispatchWorkItem?
+    }
+
+    private var pendingLaunchRestores: [AppKey: PendingLaunchRestore] = [:]
+    private static let launchRestoreTimeout: TimeInterval = 6.0
+    private static let launchRestorePollInterval: TimeInterval = 0.15
+    private static let launchRestoreMultiWindowSettle: TimeInterval = 0.25
+
     /// Spaces already probed for existing tiled layouts since launch (so manually cleared
     /// Spaces are never re-adopted on later Space switches).
     private var probedSpaces: Set<SpaceKey> = []
@@ -104,6 +121,7 @@ final class WindowManager: ObservableObject {
         pendingAdoptionRetry?.cancel()
         pendingAdoptionRetry = nil
         adoptionRetryCount = 0
+        cancelAllPendingLaunchRestores()
 
         persistSavedFloatingFrames()
         resetActiveInteractions()
@@ -206,7 +224,9 @@ final class WindowManager: ObservableObject {
 
         eventMonitor.onWindowBecameUnavailable = { [weak self] wid in
             guard let self, self.isRunning else { return }
-            if let space = self.store.handleWindowUnavailable(wid) {
+            let appKey = self.axBridge.appKey(for: wid)
+            let now = ProcessInfo.processInfo.systemUptime
+            if let space = self.store.handleWindowUnavailable(wid, appKey: appKey, timestamp: now) {
                 SeamstressLog.layout.info("Window \(wid) unavailable — expanding siblings in \(space.description, privacy: .public)")
                 self.axBridge.forget(windowID: wid)
                 self.applyFramesIfActive(spaces: [space])
@@ -226,14 +246,18 @@ final class WindowManager: ObservableObject {
                 }
             }
             if !affectedSpaces.isEmpty {
-                SeamstressLog.layout.info("PID \(pid) hid/quit — expanding siblings in \(affectedSpaces.count) space(s)")
+                SeamstressLog.layout.info("PID \(pid) hid — expanding siblings in \(affectedSpaces.count) space(s)")
                 self.applyFramesIfActive(spaces: affectedSpaces)
                 self.refreshSeamsAndUI()
             }
         }
 
-        eventMonitor.onApplicationTerminated = { [weak self] pid in
-            self?.axBridge.evictTerminatedPID(pid)
+        eventMonitor.onApplicationTerminated = { [weak self] pid, appKey in
+            self?.handleApplicationTerminated(pid: pid, appKey: appKey)
+        }
+
+        eventMonitor.onApplicationLaunched = { [weak self] pid, appKey in
+            self?.handleApplicationLaunched(pid: pid, appKey: appKey)
         }
 
         eventMonitor.onFrontmostApplicationChanged = { [weak self] pid in
@@ -325,6 +349,301 @@ final class WindowManager: ObservableObject {
     private func resetActiveInteractions() {
         windowDragController.reset()
         seamDragController.reset()
+    }
+
+    // MARK: - Quit & relaunch layout history
+
+    private func handleApplicationTerminated(pid: pid_t, appKey: AppKey?) {
+        defer { axBridge.evictTerminatedPID(pid) }
+        guard isRunning else { return }
+
+        let resolvedAppKey = appKey ?? axBridge.appKey(for: pid)
+        if let resolvedAppKey, pendingLaunchRestores[resolvedAppKey]?.pid == pid {
+            cancelPendingLaunchRestore(for: resolvedAppKey, discardSnapshot: true)
+        }
+
+        let remainingWIDs = store.allTiledWindowIDs.filter { axBridge.pid(for: $0) == pid }.sorted()
+
+        if let resolvedAppKey {
+            let now = ProcessInfo.processInfo.systemUptime
+            let (affectedSpaces, snapshot) = store.recordApplicationQuit(
+                appKey: resolvedAppKey,
+                remainingWindowIDs: remainingWIDs,
+                timestamp: now
+            )
+            for wid in remainingWIDs {
+                axBridge.forget(windowID: wid)
+            }
+            if let snapshot {
+                SeamstressLog.layout.info(
+                    "Recorded quit history for \(resolvedAppKey, privacy: .public) across \(snapshot.spaces.count) space(s)"
+                )
+            }
+            if !affectedSpaces.isEmpty {
+                SeamstressLog.layout.info("PID \(pid) quit — expanding siblings in \(affectedSpaces.count) space(s)")
+                applyFramesIfActive(spaces: affectedSpaces)
+                refreshSeamsAndUI()
+            }
+        } else if !remainingWIDs.isEmpty {
+            var affectedSpaces: Set<SpaceKey> = []
+            for wid in remainingWIDs {
+                if let space = store.handleWindowUnavailable(wid) {
+                    affectedSpaces.insert(space)
+                }
+                axBridge.forget(windowID: wid)
+            }
+            if !affectedSpaces.isEmpty {
+                SeamstressLog.layout.info("PID \(pid) quit — expanding siblings in \(affectedSpaces.count) space(s)")
+                applyFramesIfActive(spaces: affectedSpaces)
+                refreshSeamsAndUI()
+            }
+        }
+    }
+
+    private func handleApplicationLaunched(pid: pid_t, appKey: AppKey) {
+        guard isRunning, !displayObserver.isSessionInactive else { return }
+
+        let activeSpaceKeys = Set(displayObserver.displays.map(\.spaceKey))
+        guard let validSnapshot = store.validQuitSnapshot(for: appKey, activeSpaces: activeSpaceKeys) else {
+            store.discardQuitSnapshot(for: appKey)
+            return
+        }
+
+        axBridge.cacheAppKey(appKey, for: pid)
+        cancelPendingLaunchRestore(for: appKey, discardSnapshot: false)
+
+        let now = ProcessInfo.processInfo.systemUptime
+        pendingLaunchRestores[appKey] = PendingLaunchRestore(
+            appKey: appKey,
+            pid: pid,
+            expectedWindowCount: validSnapshot.totalExpectedWindows,
+            deadline: now + Self.launchRestoreTimeout
+        )
+        pollPendingLaunchRestore(for: appKey)
+    }
+
+    private func pollPendingLaunchRestore(for appKey: AppKey) {
+        guard isRunning, !displayObserver.isSessionInactive else {
+            cancelPendingLaunchRestore(for: appKey, discardSnapshot: true)
+            return
+        }
+        guard var pending = pendingLaunchRestores[appKey] else { return }
+        pending.pollWorkItem?.cancel()
+        pending.pollWorkItem = nil
+
+        let activeSpaceKeys = Set(displayObserver.displays.map(\.spaceKey))
+        guard store.validQuitSnapshot(for: appKey, activeSpaces: activeSpaceKeys) != nil else {
+            cancelPendingLaunchRestore(for: appKey, discardSnapshot: true)
+            return
+        }
+
+        if let app = NSRunningApplication(processIdentifier: pending.pid), app.isTerminated {
+            cancelPendingLaunchRestore(for: appKey, discardSnapshot: true)
+            return
+        }
+
+        if seamDragController.isActive || windowDragController.isActive {
+            pendingLaunchRestores[appKey] = pending
+            scheduleNextLaunchRestorePoll(for: appKey)
+            return
+        }
+
+        let onScreenForPID = axBridge.onScreenNormalWindows().filter { snap in
+            snap.ownerPID == pending.pid && !store.isTiled(snap.windowID)
+        }
+
+        var unverifiedTargets: [(windowID: WindowID, pid: pid_t)] = []
+        var snapByID: [WindowID: CGWindowSnapshot] = [:]
+
+        for snap in onScreenForPID {
+            let center = CGPoint(x: snap.bounds.midX, y: snap.bounds.midY)
+            let display = displayObserver.display(containing: center)
+            if let display, display.isNativeFullscreen(snap.bounds) {
+                continue
+            }
+            if pending.rejectedWindowIDs.contains(snap.windowID) {
+                continue
+            }
+            snapByID[snap.windowID] = snap
+
+            if pending.verifiedTileable[snap.windowID] != nil {
+                pending.verifiedTileable[snap.windowID] = LaunchedWindow(
+                    windowID: snap.windowID,
+                    frame: snap.bounds,
+                    spaceKey: display?.spaceKey
+                )
+            } else if !pending.checkingWindowIDs.contains(snap.windowID) {
+                pending.checkingWindowIDs.insert(snap.windowID)
+                unverifiedTargets.append((windowID: snap.windowID, pid: pending.pid))
+            }
+        }
+
+        // Drop any previously verified window that already vanished before commit.
+        for wid in Array(pending.verifiedTileable.keys) where snapByID[wid] == nil {
+            pending.verifiedTileable.removeValue(forKey: wid)
+        }
+
+        pendingLaunchRestores[appKey] = pending
+
+        if !unverifiedTargets.isEmpty {
+            let launchedPID = pending.pid
+            axBridge.checkTileabilityBatchAsync(unverifiedTargets, timeout: 0.4) { [weak self] results in
+                guard let self, self.isRunning,
+                      var current = self.pendingLaunchRestores[appKey],
+                      current.pid == launchedPID else {
+                    return
+                }
+                let checkTime = ProcessInfo.processInfo.systemUptime
+                for target in unverifiedTargets {
+                    current.checkingWindowIDs.remove(target.windowID)
+                    switch results[target.windowID] ?? .unavailable {
+                    case .tileable:
+                        if let snap = snapByID[target.windowID] {
+                            let center = CGPoint(x: snap.bounds.midX, y: snap.bounds.midY)
+                            let spaceKey = self.displayObserver.display(containing: center)?.spaceKey
+                            current.verifiedTileable[target.windowID] = LaunchedWindow(
+                                windowID: target.windowID,
+                                frame: snap.bounds,
+                                spaceKey: spaceKey
+                            )
+                            if current.firstTileableSeenAt == nil {
+                                current.firstTileableSeenAt = checkTime
+                            }
+                        }
+                    case .nonStandard:
+                        current.rejectedWindowIDs.insert(target.windowID)
+                    case .unavailable:
+                        break
+                    }
+                }
+                self.pendingLaunchRestores[appKey] = current
+                self.evaluatePendingLaunchRestore(for: appKey)
+            }
+        } else {
+            evaluatePendingLaunchRestore(for: appKey)
+        }
+    }
+
+    private func evaluatePendingLaunchRestore(for appKey: AppKey) {
+        guard let pending = pendingLaunchRestores[appKey] else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+
+        let readyToCommit: Bool
+        if pending.verifiedTileable.count >= pending.expectedWindowCount {
+            readyToCommit = true
+        } else if !pending.verifiedTileable.isEmpty,
+                  let firstSeen = pending.firstTileableSeenAt,
+                  (now - firstSeen >= Self.launchRestoreMultiWindowSettle || now >= pending.deadline) {
+            readyToCommit = true
+        } else {
+            readyToCommit = false
+        }
+
+        if readyToCommit {
+            commitPendingLaunchRestore(for: appKey)
+        } else if now >= pending.deadline && pending.checkingWindowIDs.isEmpty {
+            cancelPendingLaunchRestore(for: appKey, discardSnapshot: true)
+        } else {
+            scheduleNextLaunchRestorePoll(for: appKey)
+        }
+    }
+
+    private func scheduleNextLaunchRestorePoll(for appKey: AppKey) {
+        guard var pending = pendingLaunchRestores[appKey] else { return }
+        pending.pollWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pollPendingLaunchRestore(for: appKey)
+        }
+        pending.pollWorkItem = work
+        pendingLaunchRestores[appKey] = pending
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.launchRestorePollInterval, execute: work)
+    }
+
+    private func commitPendingLaunchRestore(for appKey: AppKey) {
+        guard let pending = pendingLaunchRestores.removeValue(forKey: appKey) else { return }
+        pending.pollWorkItem?.cancel()
+
+        guard isRunning,
+              !displayObserver.isSessionInactive,
+              !seamDragController.isActive,
+              !windowDragController.isActive else {
+            store.discardQuitSnapshot(for: appKey)
+            return
+        }
+
+        let activeSpaceKeys = Set(displayObserver.displays.map(\.spaceKey))
+        let launched = Array(pending.verifiedTileable.values)
+        guard let commit = store.restoreQuitApplication(
+            appKey: appKey,
+            launchedWindows: launched,
+            activeSpaces: activeSpaceKeys,
+            boundsForSpace: { [weak self] spaceKey in
+                self?.displayObserver.usableBounds(for: spaceKey)
+            }
+        ) else {
+            return
+        }
+
+        for win in launched where store.isTiled(win.windowID) {
+            recordDeclaredMinSizeIfAvailable(for: win.windowID)
+        }
+
+        SeamstressLog.layout.notice(
+            "Restored quit layout for \(appKey, privacy: .public) across \(commit.affectedSpaces.count) space(s)"
+        )
+
+        let expectedFrames = commit.framesToApply
+        let affectedSpaces = commit.affectedSpaces
+        axBridge.applyFrames(expectedFrames, crossMonitorSafe: true) { [weak self] in
+            guard let self else { return }
+            self.schedulePostRestoreDriftCorrection(expected: expectedFrames, after: 0.08)
+            self.schedulePostRestoreDriftCorrection(expected: expectedFrames, after: 0.25)
+            for space in affectedSpaces {
+                let spaceFrames = expectedFrames.filter { self.store.spaceKey(for: $0.key) == space }
+                if !spaceFrames.isEmpty {
+                    self.scheduleSettledMinSizeLearn(expected: spaceFrames, in: space)
+                }
+            }
+        }
+
+        persistSavedFloatingFrames()
+        refreshSeamsAndUI()
+    }
+
+    private func schedulePostRestoreDriftCorrection(expected: [WindowID: CGRect], after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.isRunning,
+                  !self.seamDragController.isActive,
+                  !self.windowDragController.isActive else {
+                return
+            }
+            var drifted: [WindowID: CGRect] = [:]
+            for (wid, target) in expected where self.store.isTiled(wid) {
+                if let actual = self.axBridge.windowBounds(windowID: wid),
+                   actual.manhattanDistance(to: target) > 3 {
+                    drifted[wid] = target
+                }
+            }
+            if !drifted.isEmpty {
+                self.axBridge.applyFrames(drifted, crossMonitorSafe: true)
+            }
+        }
+    }
+
+    private func cancelPendingLaunchRestore(for appKey: AppKey, discardSnapshot: Bool) {
+        if let pending = pendingLaunchRestores.removeValue(forKey: appKey) {
+            pending.pollWorkItem?.cancel()
+        }
+        if discardSnapshot {
+            store.discardQuitSnapshot(for: appKey)
+        }
+    }
+
+    private func cancelAllPendingLaunchRestores() {
+        for (_, pending) in pendingLaunchRestores {
+            pending.pollWorkItem?.cancel()
+        }
+        pendingLaunchRestores.removeAll()
     }
 
     // MARK: - Minimum size learning
@@ -553,9 +872,11 @@ final class WindowManager: ObservableObject {
         let onScreen = Dictionary(uniqueKeysWithValues: onScreenList.map { ($0.windowID, $0) })
 
         var affectedSpaces: Set<SpaceKey> = []
+        let now = ProcessInfo.processInfo.systemUptime
         for wid in tiledOnActiveSpaces {
             guard let snap = onScreen[wid] else {
-                if let space = store.handleWindowUnavailable(wid) {
+                let appKey = axBridge.appKey(for: wid)
+                if let space = store.handleWindowUnavailable(wid, appKey: appKey, timestamp: now) {
                     SeamstressLog.layout.info("Sanity sweep cleared off-screen window \(wid) in \(space.description, privacy: .public)")
                     affectedSpaces.insert(space)
                 }
@@ -597,13 +918,15 @@ final class WindowManager: ObservableObject {
         let seams = store.visibleSeams(for: active)
         inputTap.updateVisibleSeams(seams)
 
-        // Sync AXObserver PIDs and EventTap tiled state to apps that currently have tiled windows
+        // Sync AXObserver PIDs and EventTap tiled state to apps that currently have tiled windows,
+        // and warm appKey caches so quit history still identifies apps after process exit.
         let tiledIDs = store.allTiledWindowIDs
         var pids: Set<pid_t> = []
         for wid in tiledIDs {
             if let pid = axBridge.pid(for: wid) {
                 pids.insert(pid)
             }
+            _ = axBridge.appKey(for: wid)
         }
         inputTap.updateTiledState(windowIDs: tiledIDs, pids: pids)
         eventMonitor.syncObservedPIDs(pids)
