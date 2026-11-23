@@ -650,36 +650,83 @@ final class WindowManager: ObservableObject {
 
     private func recordDeclaredMinSizeIfAvailable(for windowID: WindowID) {
         if let declared = SkyLightBridge.shared.declaredMinimumSize(for: windowID) {
-            store.recordMinimumSize(declared, for: windowID)
+            store.recordDeclaredMinimumSize(declared, for: windowID)
+        }
+        if let liveBounds = axBridge.windowBounds(windowID: windowID) {
+            store.reconcileObservedSize(liveBounds.size, for: windowID)
         }
     }
 
-    /// After apps settle (140ms post-release), record any enforced minimum sizes via WindowServer
-    /// readback (never mid-drag, so transient lag can never poison clamping).
+    /// After apps settle (240ms post-release, past drift correction), reconcile observed sizes
+    /// and confirm any persistent minimum-size overflow with a second readback (160ms later)
+    /// so transient resize lag in Catalyst/Electron apps can never poison clamping.
     private func scheduleSettledMinSizeLearn(expected: [WindowID: CGRect], in spaceKey: SpaceKey) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { [weak self] in
+        let initialRevision = store.revision(for: spaceKey)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
             guard let self, self.isRunning,
                   !self.seamDragController.isActive,
-                  !self.windowDragController.isActive else {
+                  !self.windowDragController.isActive,
+                  self.store.revision(for: spaceKey) == initialRevision else {
                 return
             }
-            self.learnSettledMinimumSizes(expected: expected, in: spaceKey)
+            self.sampleSettledMinimumSizes(
+                expected: expected,
+                in: spaceKey,
+                expectedRevision: initialRevision
+            )
         }
     }
 
-    private func learnSettledMinimumSizes(expected: [WindowID: CGRect], in spaceKey: SpaceKey) {
-        var learnedAny = false
+    private func sampleSettledMinimumSizes(
+        expected: [WindowID: CGRect],
+        in spaceKey: SpaceKey,
+        expectedRevision: UInt64
+    ) {
+        var candidates: [WindowID: (target: CGRect, firstSample: CGSize)] = [:]
         for (wid, target) in expected {
             guard store.spaceKey(for: wid) == spaceKey,
                   let actual = axBridge.windowBounds(windowID: wid) else {
                 continue
             }
-            let minW: CGFloat = actual.width > target.width + 6 ? actual.width : 0
-            let minH: CGFloat = actual.height > target.height + 6 ? actual.height : 0
+            store.reconcileObservedSize(actual.size, for: wid)
+            if actual.width > target.width + 6 || actual.height > target.height + 6 {
+                candidates[wid] = (target: target, firstSample: actual.size)
+            }
+        }
+        guard !candidates.isEmpty else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self] in
+            guard let self, self.isRunning,
+                  !self.seamDragController.isActive,
+                  !self.windowDragController.isActive,
+                  self.store.revision(for: spaceKey) == expectedRevision else {
+                return
+            }
+            self.confirmSettledMinimumSizes(candidates: candidates, in: spaceKey)
+        }
+    }
+
+    private func confirmSettledMinimumSizes(
+        candidates: [WindowID: (target: CGRect, firstSample: CGSize)],
+        in spaceKey: SpaceKey
+    ) {
+        var learnedAny = false
+        for (wid, entry) in candidates {
+            guard store.spaceKey(for: wid) == spaceKey,
+                  let actual = axBridge.windowBounds(windowID: wid) else {
+                continue
+            }
+            store.reconcileObservedSize(actual.size, for: wid)
+            let minW: CGFloat = actual.width > entry.target.width + 6
+                ? min(entry.firstSample.width, actual.width)
+                : 0
+            let minH: CGFloat = actual.height > entry.target.height + 6
+                ? min(entry.firstSample.height, actual.height)
+                : 0
             if minW > 0 || minH > 0 {
                 store.recordMinimumSize(CGSize(width: minW, height: minH), for: wid)
                 learnedAny = true
-                SeamstressLog.layout.debug("Learned settled min size for window \(wid): \(Int(minW))x\(Int(minH))")
+                SeamstressLog.layout.info("Learned settled min size for window \(wid): \(Int(minW))x\(Int(minH))")
             }
         }
         if learnedAny,

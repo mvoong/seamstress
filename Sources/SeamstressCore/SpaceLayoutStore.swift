@@ -52,6 +52,8 @@ public final class SpaceLayoutStore {
     private var pendingQuitSnapshots: [AppKey: AppQuitSnapshot] = [:]
     private var windowToSpace: [WindowID: SpaceKey] = [:]
     private var savedFloatingFrames: [WindowID: CGRect] = [:]
+    private var declaredMinSizes: [WindowID: CGSize] = [:]
+    private var settledMinSizes: [WindowID: CGSize] = [:]
     public private(set) var learnedMinSizes: [WindowID: CGSize] = [:]
 
     public init() {}
@@ -108,12 +110,55 @@ public final class SpaceLayoutStore {
         }
     }
 
+    /// Record a WindowServer-declared minimum size floor for `windowID` (replaces any prior
+    /// declared value if the app's constraints changed, e.g. after toggling a sidebar).
+    public func recordDeclaredMinimumSize(_ size: CGSize, for windowID: WindowID) {
+        if size.width > 0 || size.height > 0 {
+            declaredMinSizes[windowID] = size
+        } else {
+            declaredMinSizes.removeValue(forKey: windowID)
+        }
+        refreshEffectiveMinSize(for: windowID)
+    }
+
+    /// Record a settled minimum size observed after a window resisted shrinking past `size`.
     public func recordMinimumSize(_ size: CGSize, for windowID: WindowID) {
-        let existing = learnedMinSizes[windowID] ?? .zero
-        learnedMinSizes[windowID] = CGSize(
+        let existing = settledMinSizes[windowID] ?? .zero
+        settledMinSizes[windowID] = CGSize(
             width: max(existing.width, size.width),
             height: max(existing.height, size.height)
         )
+        refreshEffectiveMinSize(for: windowID)
+    }
+
+    /// Lower any previously latched settled minimum that exceeds a live size the window actually
+    /// occupies (still bounded below by WindowServer's declared minimum).
+    public func reconcileObservedSize(_ observed: CGSize, for windowID: WindowID) {
+        guard var settled = settledMinSizes[windowID] else { return }
+        var changed = false
+        if settled.width > 0 && observed.width > 0 && observed.width < settled.width {
+            settled.width = observed.width
+            changed = true
+        }
+        if settled.height > 0 && observed.height > 0 && observed.height < settled.height {
+            settled.height = observed.height
+            changed = true
+        }
+        guard changed else { return }
+        settledMinSizes[windowID] = settled
+        refreshEffectiveMinSize(for: windowID)
+    }
+
+    private func refreshEffectiveMinSize(for windowID: WindowID) {
+        let declared = declaredMinSizes[windowID] ?? .zero
+        let settled = settledMinSizes[windowID] ?? .zero
+        let width = max(declared.width, settled.width)
+        let height = max(declared.height, settled.height)
+        if width > 0 || height > 0 {
+            learnedMinSizes[windowID] = CGSize(width: width, height: height)
+        } else {
+            learnedMinSizes.removeValue(forKey: windowID)
+        }
     }
 
     /// Compute all visible seams across the currently active `(SpaceKey, screenBounds)` pairs.
@@ -269,6 +314,8 @@ public final class SpaceLayoutStore {
         guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
         let previousTree = tree(for: space)
         let savedFrame = savedFloatingFrames.removeValue(forKey: windowID)
+        settledMinSizes.removeValue(forKey: windowID)
+        refreshEffectiveMinSize(for: windowID)
 
         var t = previousTree
         t.removeWindowAndCollapse(windowID)
@@ -327,6 +374,8 @@ public final class SpaceLayoutStore {
     public func detachByManualResize(windowID: WindowID) -> SpaceKey? {
         guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
         savedFloatingFrames.removeValue(forKey: windowID)
+        settledMinSizes.removeValue(forKey: windowID)
+        refreshEffectiveMinSize(for: windowID)
         var t = tree(for: space)
         t.removeWindowAndCollapse(windowID)
         store(t, for: space)
@@ -345,6 +394,8 @@ public final class SpaceLayoutStore {
     ) -> SpaceKey? {
         guard let space = windowToSpace.removeValue(forKey: windowID) else { return nil }
         let savedFrame = savedFloatingFrames.removeValue(forKey: windowID)
+        declaredMinSizes.removeValue(forKey: windowID)
+        settledMinSizes.removeValue(forKey: windowID)
         learnedMinSizes.removeValue(forKey: windowID)
         let treeBefore = tree(for: space)
         var t = treeBefore

@@ -270,4 +270,23 @@ final class SpaceLayoutStoreTests: XCTestCase {
         XCTAssertEqual(updated?[1]?.width, 756)
         XCTAssertEqual(updated?[2]?.width, 756)
     }
+
+    func testReconcileObservedSizeAndDetachClearStaleSettledMinWhileKeepingDeclaredFloor() {
+        let store = SpaceLayoutStore()
+        let p1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+
+        store.recordDeclaredMinimumSize(CGSize(width: 720, height: 532), for: 1)
+        store.recordMinimumSize(CGSize(width: 720, height: 1440), for: 1)
+        XCTAssertEqual(store.learnedMinSizes[1], CGSize(width: 720, height: 1440))
+
+        // Observing the window actually fit at 800x700 lowers the stale settled height to 700,
+        // while keeping the declared width floor of 720.
+        store.reconcileObservedSize(CGSize(width: 600, height: 700), for: 1)
+        XCTAssertEqual(store.learnedMinSizes[1], CGSize(width: 720, height: 700))
+
+        // Detaching clears the settled minimum completely while preserving the declared floor.
+        _ = store.detachByUserDrag(windowID: 1, currentFrame: boundsA, cursor: CGPoint(x: 500, y: 20))
+        XCTAssertEqual(store.learnedMinSizes[1], CGSize(width: 720, height: 532))
+    }
 }

@@ -122,7 +122,7 @@ public enum DropPlanner {
 
         // Case 1: Empty space (either empty screen or empty BSP slot)
         if leaf.isEmpty {
-            if let edge = edgeBandHit(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
+            for edge in edgeBandCandidates(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
                 let winMin = draggedMinForAxis(edge.axis)
                 let emptyMin = SeamGeometry.defaultMinLeafDimension
                 let parentLength = cell.span(along: edge.axis)
@@ -155,7 +155,7 @@ public enum DropPlanner {
 
         // Case 2: Dragging a tiled window over its own slot
         if occupant == draggedWindowID {
-            if let edge = edgeBandHit(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
+            for edge in edgeBandCandidates(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
                 let winMin = draggedMinForAxis(edge.axis)
                 let emptyMin = SeamGeometry.defaultMinLeafDimension
                 let parentLength = cell.span(along: edge.axis)
@@ -199,7 +199,6 @@ public enum DropPlanner {
             )
         }
 
-        let edge = nearestEdge(point: pointer, in: cell)
         let effectiveCell: CGRect
         if let oldLeafID = tree.leafID(for: draggedWindowID) {
             var collapsed = tree
@@ -209,22 +208,54 @@ public enum DropPlanner {
             effectiveCell = cell
         }
 
-        let draggedMin = draggedMinForAxis(edge.axis)
-        let occupantMin = SeamGeometry.minimumExtent(
-            of: .window(id: 0, windowID: occupant),
-            along: edge.axis,
-            minSizes: minSizes
-        )
-        let effectiveLength = effectiveCell.span(along: edge.axis)
-        let firstMin = edge.isFirstChild ? draggedMin : occupantMin
-        let secondMin = edge.isFirstChild ? occupantMin : draggedMin
+        func ratioForOccupiedEdge(_ edge: SplitEdge) -> CGFloat? {
+            let draggedMin = draggedMinForAxis(edge.axis)
+            let occupantMin = SeamGeometry.minimumExtent(
+                of: .window(id: 0, windowID: occupant),
+                along: edge.axis,
+                minSizes: minSizes
+            )
+            let effectiveLength = effectiveCell.span(along: edge.axis)
+            let firstMin = edge.isFirstChild ? draggedMin : occupantMin
+            let secondMin = edge.isFirstChild ? occupantMin : draggedMin
+            return feasibleSplitRatio(
+                parentLength: effectiveLength,
+                firstMinPx: firstMin,
+                secondMinPx: secondMin
+            )
+        }
 
-        guard let ratio = feasibleSplitRatio(
-            parentLength: effectiveLength,
-            firstMinPx: firstMin,
-            secondMinPx: secondMin
-        ) else {
-            // Cannot fit both windows side-by-side along this axis; fall back to swap/replace.
+        let canSplitVertical = ratioForOccupiedEdge(.left) != nil
+        let canSplitHorizontal = ratioForOccupiedEdge(.top) != nil
+
+        // When one split axis is impossible due to minimum window sizes (e.g. a narrow column
+        // that can't split left/right), allocate the full outer bands of the feasible axis
+        // instead of letting infeasible edge triangles swallow them into swap/replace.
+        let chosenEdge: SplitEdge?
+        if canSplitVertical && canSplitHorizontal {
+            chosenEdge = nearestEdge(point: pointer, in: cell)
+        } else if canSplitHorizontal {
+            if pointer.y < centerRect.minY {
+                chosenEdge = .top
+            } else if pointer.y > centerRect.maxY {
+                chosenEdge = .bottom
+            } else {
+                chosenEdge = nil
+            }
+        } else if canSplitVertical {
+            if pointer.x < centerRect.minX {
+                chosenEdge = .left
+            } else if pointer.x > centerRect.maxX {
+                chosenEdge = .right
+            } else {
+                chosenEdge = nil
+            }
+        } else {
+            chosenEdge = nil
+        }
+
+        guard let edge = chosenEdge, let ratio = ratioForOccupiedEdge(edge) else {
+            // Cannot fit both windows along the targeted axis; fall back to swap/replace.
             return DropPlan(
                 targetSpace: targetSpace,
                 action: .swapOrReplace(leafID: leaf.leafID, targetWindowID: occupant),
@@ -349,14 +380,14 @@ public enum DropPlanner {
         return simulated.windowFrames(in: screenBounds)[draggedWindowID] ?? fallback
     }
 
-    /// Returns the closest edge if `point` lies inside one of the four edge bands of `rect`,
-    /// or `nil` if `point` is in the interior.
-    private static func edgeBandHit(
+    /// Returns every edge whose band contains `point`, sorted from closest to farthest
+    /// (normalized within its band).
+    private static func edgeBandCandidates(
         point: CGPoint,
         in rect: CGRect,
         fraction: CGFloat,
         maxPixels: CGFloat
-    ) -> SplitEdge? {
+    ) -> [SplitEdge] {
         let bandX = min(rect.width * fraction, maxPixels)
         let bandY = min(rect.height * fraction, maxPixels)
 
@@ -371,7 +402,7 @@ public enum DropPlanner {
         if dTop <= bandY, bandY > 0 { candidates.append((.top, dTop / bandY)) }
         if dBottom <= bandY, bandY > 0 { candidates.append((.bottom, dBottom / bandY)) }
 
-        return candidates.min(by: { $0.1 < $1.1 })?.0
+        return candidates.sorted(by: { $0.1 < $1.1 }).map(\.0)
     }
 
     /// Picks left/right/top/bottom using normalized distance from each edge (handles

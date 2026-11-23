@@ -328,4 +328,140 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(plan?.previewKind, .splitContainer)
         XCTAssertEqual(plan?.previewRect, CGRect(x: 750, y: 0, width: 250, height: 800))
     }
+
+    func testInfeasibleVerticalAxisAllocatesFullWidthTopAndBottomZones() {
+        // Mirrors a narrow ultrawide column (806x1440, min 720x532) targeted by a floating
+        // window (min 420x320): left/right cannot fit (720 + 420 > 806), while top/bottom
+        // fits comfortably (532 + 320 <= 1440).
+        let ultrawide = CGRect(x: 0, y: 0, width: 3440, height: 1440)
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 10)
+        tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .right, ratio: 2634.0 / 3440.0, with: 20)
+        let leaf20 = tree.leafID(for: 20)!
+
+        let minSizes: [WindowID: CGSize] = [
+            20: CGSize(width: 720, height: 532),
+            30: CGSize(width: 420, height: 320),
+        ]
+
+        // Bottom-left, bottom-center, and bottom-right of window 20 all split .bottom
+        // instead of falling into an infeasible .left/.right -> .replace zone.
+        for x in [CGFloat(2660), CGFloat(3037), CGFloat(3410)] {
+            let bottomPlan = DropPlanner.plan(
+                pointer: CGPoint(x: x, y: 1050),
+                draggedWindowID: 30,
+                targetSpace: space,
+                tree: tree,
+                screenBounds: ultrawide,
+                minSizes: minSizes
+            )
+            XCTAssertEqual(bottomPlan?.action, .splitOccupied(leafID: leaf20, edge: .bottom), "Failed at x=\(x)")
+            XCTAssertEqual(bottomPlan?.previewKind, .split)
+            XCTAssertEqual(bottomPlan?.previewRect, CGRect(x: 2634, y: 720, width: 806, height: 720))
+        }
+
+        // Top-left and top-right also split .top across the full column width.
+        for x in [CGFloat(2660), CGFloat(3410)] {
+            let topPlan = DropPlanner.plan(
+                pointer: CGPoint(x: x, y: 300),
+                draggedWindowID: 30,
+                targetSpace: space,
+                tree: tree,
+                screenBounds: ultrawide,
+                minSizes: minSizes
+            )
+            XCTAssertEqual(topPlan?.action, .splitOccupied(leafID: leaf20, edge: .top), "Failed at x=\(x)")
+            XCTAssertEqual(topPlan?.previewKind, .split)
+            XCTAssertEqual(topPlan?.previewRect, CGRect(x: 2634, y: 0, width: 806, height: 720))
+        }
+
+        // Middle vertical band (including its left/right edges) still replaces cleanly.
+        for x in [CGFloat(2660), CGFloat(3037), CGFloat(3410)] {
+            let midPlan = DropPlanner.plan(
+                pointer: CGPoint(x: x, y: 720),
+                draggedWindowID: 30,
+                targetSpace: space,
+                tree: tree,
+                screenBounds: ultrawide,
+                minSizes: minSizes
+            )
+            XCTAssertEqual(midPlan?.action, .swapOrReplace(leafID: leaf20, targetWindowID: 20), "Failed at x=\(x)")
+            XCTAssertEqual(midPlan?.previewKind, .replace)
+        }
+    }
+
+    func testInfeasibleHorizontalAxisAllocatesFullHeightLeftAndRightZones() {
+        // Short wide slot (1000x400) where top/bottom cannot fit (300 + 250 > 400)
+        // but left/right fits (300 + 300 <= 1000).
+        let shortScreen = CGRect(x: 0, y: 0, width: 1000, height: 400)
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 10)
+        let leaf10 = tree.leafID(for: 10)!
+        let minSizes: [WindowID: CGSize] = [
+            10: CGSize(width: 300, height: 300),
+            20: CGSize(width: 300, height: 250),
+        ]
+
+        // Bottom-left corner picks .left instead of infeasible .bottom -> .replace.
+        let leftPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 150, y: 380),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: shortScreen,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(leftPlan?.action, .splitOccupied(leafID: leaf10, edge: .left))
+        XCTAssertEqual(leftPlan?.previewKind, .split)
+
+        // Top-center (inside horizontal middle band) falls back to .replace.
+        let midTop = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 20),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: shortScreen,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(midTop?.action, .swapOrReplace(leafID: leaf10, targetWindowID: 10))
+        XCTAssertEqual(midTop?.previewKind, .replace)
+    }
+
+    func testOwnSlotAndEmptySlotCornerFallBackToFeasibleEdge() {
+        // Narrow 806x1440 column for window 20 (min 720x532): shrinking left/right is impossible
+        // (720 + 140 > 806), so dragging to its own bottom-left corner picks .bottom instead of keepInPlace.
+        let ultrawide = CGRect(x: 0, y: 0, width: 3440, height: 1440)
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 10)
+        tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .right, ratio: 2634.0 / 3440.0, with: 20)
+        let leaf20 = tree.leafID(for: 20)!
+        let minSizes: [WindowID: CGSize] = [20: CGSize(width: 720, height: 532)]
+
+        // Pointer is closer to right edge (dRight=10 / 145 = 0.069) than bottom edge (dBottom=40 / 220 = 0.18),
+        // away from the vertical seam T-junction, and .right is infeasible so .bottom wins.
+        let ownShrink = DropPlanner.plan(
+            pointer: CGPoint(x: 3430, y: 1400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: ultrawide,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(ownShrink?.action, .shrinkOwnSlot(leafID: leaf20, edge: .bottom))
+        XCTAssertEqual(ownShrink?.previewKind, .split)
+
+        // Same corner behavior for an empty narrow slot when dragging window 20 into it.
+        tree.removeWindow(20)
+        let emptyLeafID = tree.leaf(at: CGPoint(x: 3430, y: 1400), in: ultrawide)!.leafID
+        let emptySplit = DropPlanner.plan(
+            pointer: CGPoint(x: 3430, y: 1400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: ultrawide,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(emptySplit?.action, .splitEmpty(leafID: emptyLeafID, edge: .bottom))
+        XCTAssertEqual(emptySplit?.previewKind, .split)
+    }
 }
