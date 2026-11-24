@@ -80,6 +80,21 @@ SEAMSTRESS_SIGN_ID="Developer ID Application: Your Name (TEAMID)" \
 
 On first launch, open `/Applications/Seamstress.app` and grant **Accessibility** permission in **System Settings → Privacy & Security → Accessibility**. Seamstress detects the grant automatically without needing a relaunch.
 
+### Notarized Releases
+
+`scripts/release.sh` builds a universal (`arm64` + `x86_64`) Release bundle, signs it with Hardened Runtime + secure timestamp, packages a signed `build/release/Seamstress-<version>.dmg` (with an `Applications` symlink), notarizes via `xcrun notarytool`, staples and verifies with Gatekeeper (`spctl`), tags `v<version>`, and uploads the `.dmg` with `gh`:
+
+```bash
+# Uses 1Password item "op://Development/App Store Connect Notary" by default
+./scripts/release.sh
+
+# Or build, notarize, and verify locally without tagging/uploading
+./scripts/release.sh --no-upload
+
+# Or authenticate with a notarytool keychain profile instead of 1Password
+SEAMSTRESS_NOTARY_PROFILE="seamstress-notary" ./scripts/release.sh
+```
+
 ## Troubleshooting
 
 - **Seamstress does not respond to drags or seams:** Verify Accessibility is enabled for `/Applications/Seamstress.app` in System Settings. If you rebuilt with a different signing identity (or ad-hoc signing), remove and re-add Seamstress in Accessibility settings.
