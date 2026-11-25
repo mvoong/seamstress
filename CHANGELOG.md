@@ -5,6 +5,16 @@ All notable changes to Seamstress are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-11-25
+
+### Added
+- Sparkle 2 automatic updates (`Check for Updates…` and `Check for updates automatically` in the menu bar popover, backed by EdDSA-signed updates at `https://seamstress.voong.io/appcast.xml`).
+- Built-in **Drag windows from anywhere (`⌃⌘`)** toggle in the menu bar popover that configures macOS's global `NSWindowShouldDragOnGesture` setting.
+- Interactive web playground and marketing site at `https://seamstress.voong.io`.
+
+### Changed
+- Clarified the menu bar popover cheat sheet by replacing `⌥ / ⌃⌘ Drag` with `⌥ + Drag` and showing `⌃⌘ + Drag` on its own row when Drag Anywhere is enabled.
+
 ## [0.1.1] - 2026-11-25
 
 ### Fixed
@@ -27,5 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sleep/lock/wake layout preservation and Option-click unfocused-window protection.
 - Universal (`arm64` + `x86_64`) signed and notarized DMG release script.
 
+[0.1.2]: https://github.com/mvoong/seamstress/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mvoong/seamstress/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mvoong/seamstress/releases/tag/v0.1.0
