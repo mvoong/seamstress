@@ -2,6 +2,8 @@
 
 A lightweight, mouse-driven macOS tiling window manager built around floating-by-default windows, Option-drag splitting, and real-time flush seam resizing.
 
+Try the interactive layout playground at **[seamstress.voong.io](https://seamstress.voong.io)**.
+
 ![Seamstress tiling demo](assets/demo.svg)
 
 ## Design Philosophy
@@ -56,8 +58,9 @@ Works passively with both standard titlebar dragging (`⌥` + drag) and macOS dr
 - **`SeamDragController.swift`, `WindowDragController.swift`, `LayoutPersistence.swift`, `WindowManager.swift`, `MenuBarPopoverView.swift`, `AppDelegate.swift`**: `@MainActor`-isolated runtime coordinating seam and window drag controllers, persisted floating restore frames, Accessibility permission gate with live polling, interactive per-display minimap with pre-resolved app icons and Equalize/Clear actions, custom template menu bar icon (Option-click/right-click quick pause, optional hidden menu bar icon with standalone controls window), and launch-at-login (`SMAppService.mainApp` with approval-state surfacing).
 
 ### `site/` (Static Website & Interactive Playground)
-- Zero-server, zero-build static site (`site/index.html`, `site/styles.css`, `site/favicon.svg`, `site/seamstress-core.js`, `site/playground.js`) that runs directly from `file://` or any static host.
+- Zero-server, zero-build static site (`site/index.html`, `site/styles.css`, `site/favicon.svg`, `site/seamstress-core.js`, `site/playground.js`, `site/CNAME`) published to [seamstress.voong.io](https://seamstress.voong.io) via `.github/workflows/pages.yml` and runnable directly from `file://`.
 - Includes a live interactive macOS desktop sandbox porting `SeamstressCore` (`⌥`-drag snapping, T-junction splits, center swap/replace, flush seam and `┼` intersection resizing with magnetic detents and min-size clamping, `Esc` undo, quit-and-relaunch slot restore, and the menu bar minimap).
+- Release version labels (`data-version` in `site/index.html`) are automatically synced and committed by `scripts/release.sh` during release uploads.
 
 ## Build, Test & Install
 

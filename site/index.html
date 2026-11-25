@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Seamstress — Mouse-Driven macOS Tiling Window Manager</title>
   <meta name="description" content="A lightweight, mouse-driven macOS tiling window manager built around floating-by-default windows, Option-drag splitting, and real-time flush seam resizing.">
+  <link rel="canonical" href="https://seamstress.voong.io/">
+  <link rel="me" href="https://github.com/mvoong/seamstress">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Seamstress">
+  <meta property="og:title" content="Seamstress — Mouse-Driven macOS Tiling Window Manager">
+  <meta property="og:description" content="Floating by default, Option-drag splitting, and real-time flush seam resizing for macOS 13+.">
+  <meta property="og:url" content="https://seamstress.voong.io/">
+  <meta name="twitter:card" content="summary">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="styles.css">
   <script defer src="seamstress-core.js"></script>
@@ -16,7 +24,7 @@
       <a class="brand" href="#top">
         <img src="favicon.svg" alt="" width="28" height="28">
         <span>Seamstress</span>
-        <span class="version-pill">v0.1.1</span>
+        <span class="version-pill" data-version>v0.1.1</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
         <a href="#sandbox">Try It</a>
@@ -271,7 +279,7 @@
                       <span class="tl tl-min"></span>
                       <span class="tl tl-max"></span>
                     </div>
-                    <span class="win-title">Notes — Release v0.1.1</span>
+                    <span class="win-title">Notes — Release <span data-version>v0.1.1</span></span>
                     <span class="win-badge" data-badge>Float</span>
                   </div>
                   <div class="win-body">
@@ -524,7 +532,7 @@
         <div class="install-grid">
           <div class="download-card">
             <div>
-              <h3>Download Seamstress v0.1.1</h3>
+              <h3>Download Seamstress <span data-version>v0.1.1</span></h3>
               <p style="margin:0; color:var(--text-muted); font-size:14px;">
                 Drag <strong>Seamstress.app</strong> into Applications, launch it, and grant Accessibility access—Seamstress picks up the permission automatically with no relaunch required.
               </p>

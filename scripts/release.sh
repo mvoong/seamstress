@@ -218,7 +218,16 @@ if [ "$NO_UPLOAD" = true ]; then
     exit 0
 fi
 
-echo "[7/7] Tagging $TAG and uploading GitHub release to $GH_REPO..."
+echo "[7/7] Syncing site version, tagging $TAG, and uploading GitHub release to $GH_REPO..."
+SITE_INDEX="$ROOT/site/index.html"
+if [ -f "$SITE_INDEX" ]; then
+    VERSION_TAG="$TAG" /usr/bin/perl -0777 -i -pe 's/(<span\b[^>]*\bdata-version\b[^>]*>)v?[0-9]+\.[0-9]+\.[0-9]+([^<]*<\/span>)/$1.$ENV{VERSION_TAG}.$2/ge' "$SITE_INDEX"
+    if ! git -C "$ROOT" diff --quiet -- "$SITE_INDEX"; then
+        git -C "$ROOT" add "$SITE_INDEX"
+        git -C "$ROOT" commit -m "Update site version to $TAG"
+    fi
+fi
+
 if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     TAG_COMMIT="$(git -C "$ROOT" rev-list -n 1 "$TAG")"
     HEAD_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
