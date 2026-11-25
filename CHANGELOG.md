@@ -5,6 +5,12 @@ All notable changes to Seamstress are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-11-25
+
+### Fixed
+- Prevented macOS 15+ native Option-drag tiling (`hotzoneDrag`) from hijacking Seamstress `⌥`-drags by stripping `⌥` from `leftMouseDragged`, `leftMouseUp`, and `flagsChanged` while an active window move is in progress (leaving in-app Option-drags untouched).
+- Guarded settled minimum-size learning so windows displaced off their target span or still animating can no longer poison learned minimum window sizes.
+
 ## [0.1.2] - 2026-11-25
 
 ### Added
@@ -37,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sleep/lock/wake layout preservation and Option-click unfocused-window protection.
 - Universal (`arm64` + `x86_64`) signed and notarized DMG release script.
 
+[0.1.3]: https://github.com/mvoong/seamstress/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mvoong/seamstress/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mvoong/seamstress/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mvoong/seamstress/releases/tag/v0.1.0
