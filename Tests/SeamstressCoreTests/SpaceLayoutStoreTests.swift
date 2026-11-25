@@ -358,4 +358,53 @@ final class SpaceLayoutStoreTests: XCTestCase {
         XCTAssertEqual(store.tree(for: spaceA).leafPlacements(in: boundsA).count, 1)
         XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA), [2: boundsA])
     }
+
+    func testConfirmedSettledMinimumOverflowAcceptsGenuineRefusalsAndRejectsDisplacedOrAnimating() {
+        let target = CGRect(x: 1036, y: 30, width: 1036, height: 1346)
+
+        // Genuine horizontal min-size refusal anchored at target.minX
+        let anchored = CGRect(x: 1036, y: 30, width: 1200, height: 1346)
+        XCTAssertEqual(
+            SpaceLayoutStore.confirmedSettledMinimumOverflow(
+                target: target,
+                firstSample: anchored,
+                secondSample: anchored
+            ),
+            CGSize(width: 1200, height: 0)
+        )
+
+        // Genuine refusal pushed left by right screen edge clamping still covers target span
+        let edgeTarget = CGRect(x: 2440, y: 30, width: 1000, height: 1346)
+        let edgeClamped = CGRect(x: 2240, y: 30, width: 1200, height: 1346)
+        XCTAssertEqual(
+            SpaceLayoutStore.confirmedSettledMinimumOverflow(
+                target: edgeTarget,
+                firstSample: edgeClamped,
+                secondSample: edgeClamped
+            ),
+            CGSize(width: 1200, height: 0)
+        )
+
+        // Window hijacked by macOS native right-half tiling (origin jumped to x=1720) must NOT poison min size
+        let hijackedFirst = CGRect(x: 1720, y: 30, width: 1716, height: 1346)
+        let hijackedSecond = CGRect(x: 1720, y: 30, width: 1720, height: 1346)
+        XCTAssertNil(
+            SpaceLayoutStore.confirmedSettledMinimumOverflow(
+                target: target,
+                firstSample: hijackedFirst,
+                secondSample: hijackedSecond
+            )
+        )
+
+        // Still-animating window whose width changed by > 4pt between samples must NOT latch yet
+        let animatingFirst = CGRect(x: 1036, y: 30, width: 1400, height: 1346)
+        let animatingSecond = CGRect(x: 1036, y: 30, width: 1250, height: 1346)
+        XCTAssertNil(
+            SpaceLayoutStore.confirmedSettledMinimumOverflow(
+                target: target,
+                firstSample: animatingFirst,
+                secondSample: animatingSecond
+            )
+        )
+    }
 }

@@ -47,7 +47,7 @@ Works passively with both standard titlebar dragging (`⌥` + drag) and macOS dr
 - **`SpaceLayoutStore.swift` & `LayoutHistory.swift`**: Manages per-`(displayUUID, nativeSpaceID)` trees, pre-tiled floating frames, cross-monitor moves/swaps, and per-space layout revision history for restoring quit applications when they relaunch into an unchanged Space.
 - **`LayoutReconstructor.swift`**: Pure guillotine-cut BSP reconstructor that converts existing flush-arranged windows into `LayoutTree`s on launch while ignoring floating windows.
 - **`FrameCoalescer.swift`**: Per-PID latest-frame coalescing state machine for live resizing.
-- **`OptionClickPolicy.swift`**: Strips `⌥` on `leftMouseDown` when Option-clicking an unfocused window involving a tiled layout, preventing macOS's native Option-click-to-hide shortcut from hiding and evicting focused windows.
+- **`OptionClickPolicy.swift`**: Strips `⌥` on `leftMouseDown` when Option-clicking an unfocused window involving a tiled layout (preventing macOS's Option-click-to-hide shortcut from evicting focused windows) and during active window drags (preventing macOS 15+ native Option-drag tiling from hijacking Seamstress drops).
 
 ### `Sources/Seamstress` (macOS AppKit / SwiftUI runtime)
 - **`InputEventTap.swift`**: `CGEventTap` running on a dedicated `.userInteractive` thread. `mouseMoved` does a pure in-memory rect check against visible seams with zero main-thread hops when away from seams. Swallows events only when interacting with an unoccluded seam.

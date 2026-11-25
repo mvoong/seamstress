@@ -682,7 +682,7 @@ final class WindowManager: ObservableObject {
         in spaceKey: SpaceKey,
         expectedRevision: UInt64
     ) {
-        var candidates: [WindowID: (target: CGRect, firstSample: CGSize)] = [:]
+        var candidates: [WindowID: (target: CGRect, firstSample: CGRect)] = [:]
         for (wid, target) in expected {
             guard store.spaceKey(for: wid) == spaceKey,
                   let actual = axBridge.windowBounds(windowID: wid) else {
@@ -690,7 +690,7 @@ final class WindowManager: ObservableObject {
             }
             store.reconcileObservedSize(actual.size, for: wid)
             if actual.width > target.width + 6 || actual.height > target.height + 6 {
-                candidates[wid] = (target: target, firstSample: actual.size)
+                candidates[wid] = (target: target, firstSample: actual)
             }
         }
         guard !candidates.isEmpty else { return }
@@ -707,7 +707,7 @@ final class WindowManager: ObservableObject {
     }
 
     private func confirmSettledMinimumSizes(
-        candidates: [WindowID: (target: CGRect, firstSample: CGSize)],
+        candidates: [WindowID: (target: CGRect, firstSample: CGRect)],
         in spaceKey: SpaceKey
     ) {
         var learnedAny = false
@@ -717,16 +717,14 @@ final class WindowManager: ObservableObject {
                 continue
             }
             store.reconcileObservedSize(actual.size, for: wid)
-            let minW: CGFloat = actual.width > entry.target.width + 6
-                ? min(entry.firstSample.width, actual.width)
-                : 0
-            let minH: CGFloat = actual.height > entry.target.height + 6
-                ? min(entry.firstSample.height, actual.height)
-                : 0
-            if minW > 0 || minH > 0 {
-                store.recordMinimumSize(CGSize(width: minW, height: minH), for: wid)
+            if let learned = SpaceLayoutStore.confirmedSettledMinimumOverflow(
+                target: entry.target,
+                firstSample: entry.firstSample,
+                secondSample: actual
+            ) {
+                store.recordMinimumSize(learned, for: wid)
                 learnedAny = true
-                SeamstressLog.layout.info("Learned settled min size for window \(wid): \(Int(minW))x\(Int(minH))")
+                SeamstressLog.layout.info("Learned settled min size for window \(wid): \(Int(learned.width))x\(Int(learned.height))")
             }
         }
         if learnedAny,

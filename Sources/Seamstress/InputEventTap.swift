@@ -425,7 +425,8 @@ final class InputEventTap {
             return event
 
         case .leftMouseDragged:
-            let shiftDown = event.flags.contains(.maskShift)
+            let originalFlags = event.flags
+            let shiftDown = originalFlags.contains(.maskShift)
             lock.lock()
             lastMouseLocation = point
             if swallowingDoubleClickUp || swallowingCancelledSeamDrag || swallowingCancelledWindowDrag {
@@ -441,7 +442,15 @@ final class InputEventTap {
                 return nil
             }
             lastSnapModifierDown = snapModifierDown
+            let activeWindowMove = hasActiveWindowMove
             lock.unlock()
+
+            if OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: originalFlags,
+                hasActiveWindowMove: activeWindowMove
+            ) {
+                event.flags = OptionClickPolicy.strippingOption(from: originalFlags)
+            }
 
             DispatchQueue.main.async { [weak self] in
                 self?.onWindowMouseDragged?(point, snapModifierDown)
@@ -449,8 +458,10 @@ final class InputEventTap {
             return event
 
         case .leftMouseUp:
+            let originalFlags = event.flags
             lock.lock()
             isLeftMouseDown = false
+            let wasActiveWindowMove = hasActiveWindowMove
             hasActiveWindowMove = false
             if swallowingDoubleClickUp || swallowingCancelledSeamDrag || swallowingCancelledWindowDrag {
                 swallowingDoubleClickUp = false
@@ -470,23 +481,40 @@ final class InputEventTap {
             }
             lock.unlock()
 
+            if OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: originalFlags,
+                hasActiveWindowMove: wasActiveWindowMove
+            ) {
+                event.flags = OptionClickPolicy.strippingOption(from: originalFlags)
+            }
+
             DispatchQueue.main.async { [weak self] in
                 self?.onWindowMouseUp?(point, snapModifierDown)
             }
             return event
 
         case .flagsChanged:
-            let shiftDown = event.flags.contains(.maskShift)
+            let originalFlags = event.flags
+            let shiftDown = originalFlags.contains(.maskShift)
             lock.lock()
             let notifySeamShift = activeSeamDrag != nil && shiftDown != lastShiftDownDuringSeamDrag
             if notifySeamShift {
                 lastShiftDownDuringSeamDrag = shiftDown
             }
-            let notifyWindowSnap = !notifySeamShift && isLeftMouseDown && activeSeamDrag == nil && !swallowingCancelledSeamDrag && !swallowingCancelledWindowDrag && snapModifierDown != lastSnapModifierDown
+            let inWindowDrag = !notifySeamShift && isLeftMouseDown && activeSeamDrag == nil && !swallowingCancelledSeamDrag && !swallowingCancelledWindowDrag
+            let notifyWindowSnap = inWindowDrag && snapModifierDown != lastSnapModifierDown
             if notifyWindowSnap {
                 lastSnapModifierDown = snapModifierDown
             }
+            let shouldStripOption = inWindowDrag && OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: originalFlags,
+                hasActiveWindowMove: hasActiveWindowMove
+            )
             lock.unlock()
+
+            if shouldStripOption {
+                event.flags = OptionClickPolicy.strippingOption(from: originalFlags)
+            }
 
             if notifySeamShift {
                 DispatchQueue.main.async { [weak self] in

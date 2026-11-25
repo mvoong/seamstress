@@ -131,6 +131,42 @@ public final class SpaceLayoutStore {
         refreshEffectiveMinSize(for: windowID)
     }
 
+    /// Evaluates whether two post-apply window frames (`firstSample` and `secondSample`)
+    /// represent a genuine, settled minimum-size refusal against `target`, returning the
+    /// confirmed minimum width/height (`0` on axes that did not refuse shrinking).
+    ///
+    /// Guards against two false positives:
+    /// 1. Displaced/hijacked windows that moved off `target`'s span on an overflowing axis
+    ///    (e.g. macOS native tiling snapping the window elsewhere).
+    /// 2. Still-animating windows whose two samples have not yet stabilized.
+    public static func confirmedSettledMinimumOverflow(
+        target: CGRect,
+        firstSample: CGRect,
+        secondSample: CGRect,
+        overflowThreshold: CGFloat = 6,
+        spanTolerance: CGFloat = 12,
+        settleTolerance: CGFloat = 4
+    ) -> CGSize? {
+        let horizontalOverflow =
+            firstSample.width > target.width + overflowThreshold
+            && secondSample.width > target.width + overflowThreshold
+            && abs(secondSample.width - firstSample.width) <= settleTolerance
+            && secondSample.minX <= target.minX + spanTolerance
+            && secondSample.maxX >= target.maxX - spanTolerance
+
+        let verticalOverflow =
+            firstSample.height > target.height + overflowThreshold
+            && secondSample.height > target.height + overflowThreshold
+            && abs(secondSample.height - firstSample.height) <= settleTolerance
+            && secondSample.minY <= target.minY + spanTolerance
+            && secondSample.maxY >= target.maxY - spanTolerance
+
+        let minW: CGFloat = horizontalOverflow ? min(firstSample.width, secondSample.width) : 0
+        let minH: CGFloat = verticalOverflow ? min(firstSample.height, secondSample.height) : 0
+        guard minW > 0 || minH > 0 else { return nil }
+        return CGSize(width: minW, height: minH)
+    }
+
     /// Lower any previously latched settled minimum that exceeds a live size the window actually
     /// occupies (still bounded below by WindowServer's declared minimum).
     public func reconcileObservedSize(_ observed: CGSize, for windowID: WindowID) {

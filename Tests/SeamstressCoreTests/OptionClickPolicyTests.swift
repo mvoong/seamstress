@@ -126,4 +126,43 @@ final class OptionClickPolicyTests: XCTestCase {
         XCTAssertEqual(stripped.rawValue & 0x40, 0)
         XCTAssertTrue(stripped.contains(.maskShift))
     }
+
+    func testStripsOptionDuringActiveWindowDragOnly() {
+        XCTAssertTrue(
+            OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: .maskAlternate,
+                hasActiveWindowMove: true
+            )
+        )
+        XCTAssertTrue(
+            OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: [.maskAlternate, .maskShift],
+                hasActiveWindowMove: true
+            )
+        )
+        XCTAssertFalse(
+            OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: .maskAlternate,
+                hasActiveWindowMove: false
+            )
+        )
+        XCTAssertFalse(
+            OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: [.maskAlternate, .maskCommand],
+                hasActiveWindowMove: true
+            )
+        )
+        XCTAssertFalse(
+            OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: [.maskAlternate, .maskControl],
+                hasActiveWindowMove: true
+            )
+        )
+        XCTAssertFalse(
+            OptionClickPolicy.shouldStripOptionDuringWindowDrag(
+                flags: [.maskControl, .maskCommand],
+                hasActiveWindowMove: true
+            )
+        )
+    }
 }
