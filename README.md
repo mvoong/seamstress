@@ -87,9 +87,9 @@ SEAMSTRESS_SIGN_ID="Developer ID Application: Your Name (TEAMID)" \
 
 On first launch, open `/Applications/Seamstress.app` and grant **Accessibility** permission in **System Settings → Privacy & Security → Accessibility**. Seamstress detects the grant automatically without needing a relaunch.
 
-### Notarized Releases
+### Notarized Releases & Auto-Updates
 
-`scripts/release.sh` builds a universal (`arm64` + `x86_64`) Release bundle, signs it with Hardened Runtime + secure timestamp, packages a signed `build/release/Seamstress-<version>.dmg` (with an `Applications` symlink), notarizes via `xcrun notarytool`, staples and verifies with Gatekeeper (`spctl`), tags `v<version>`, and uploads the `.dmg` with `gh`:
+`scripts/release.sh` builds a universal (`arm64` + `x86_64`) Release bundle with embedded `Sparkle.framework`, signs all nested helpers and the app with Hardened Runtime + secure timestamp, packages a signed `build/release/Seamstress-<version>.dmg` (with an `Applications` symlink), notarizes via `xcrun notarytool`, staples and verifies with Gatekeeper (`spctl`), signs the `.dmg` with Sparkle's EdDSA key (`op://Development/Seamstress Sparkle EdDSA/private-key`) to update `site/appcast.xml`, syncs version badges in `site/index.html`, tags `v<version>`, and uploads the `.dmg` with `gh`:
 
 ```bash
 # Uses 1Password item "op://Development/App Store Connect Notary" by default

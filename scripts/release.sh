@@ -34,6 +34,9 @@ Environment overrides:
   SEAMSTRESS_SIGN_ID          Override CODE_SIGN_IDENTITY
   SEAMSTRESS_NOTARY_OP_ITEM   1Password item reference (default: op://Development/App Store Connect Notary)
   SEAMSTRESS_NOTARY_PROFILE   Use a notarytool keychain profile instead of 1Password
+  SEAMSTRESS_SPARKLE_OP_ITEM  1Password item for Sparkle EdDSA keys (default: op://Development/Seamstress Sparkle EdDSA)
+  SEAMSTRESS_SPARKLE_KEY_FILE Local file containing Sparkle EdDSA private key (instead of 1Password)
+  SEAMSTRESS_SPARKLE_PUBLIC_KEY Override SUPublicEDKey in Info.plist
 EOF
 }
 
@@ -155,15 +158,37 @@ swift "$ROOT/Resources/generate-icon.swift" "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$BUILD_ROOT/AppIcon.icns"
 
 echo "[3/7] Assembling $APP_NAME.app ($BUNDLE_ID, $VERSION)..."
+SPARKLE_ARTIFACTS="$BUILD_ROOT/spm/artifacts/sparkle/Sparkle"
+SPARKLE_FW="$SPARKLE_ARTIFACTS/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+SPARKLE_SIGN_UPDATE="$SPARKLE_ARTIFACTS/bin/sign_update"
+test -d "$SPARKLE_FW"
+
 rm -rf "$APP_BUNDLE" "$DMG_STAGE" "$RELEASE_DMG"
-mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks"
 cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_BUNDLE/Contents/Info.plist")"
 cp "$BUILD_ROOT/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+ditto "$SPARKLE_FW" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+
+SPARKLE_OP_ITEM="${SEAMSTRESS_SPARKLE_OP_ITEM:-op://Development/Seamstress Sparkle EdDSA}"
+SPARKLE_PUBLIC_KEY="${SEAMSTRESS_SPARKLE_PUBLIC_KEY:-$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true)}"
+if [ -z "$SPARKLE_PUBLIC_KEY" ] && command -v op >/dev/null 2>&1; then
+    SPARKLE_PUBLIC_KEY="$(op read -n "$SPARKLE_OP_ITEM/public-key" 2>/dev/null || true)"
+fi
+if [ -n "$SPARKLE_PUBLIC_KEY" ]; then
+    /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_KEY" "$APP_BUNDLE/Contents/Info.plist"
+fi
 
 echo "[4/7] Signing $APP_NAME.app and creating signed DMG..."
+EMBEDDED_SPARKLE="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$EMBEDDED_SPARKLE/Versions/B/XPCServices/Installer.xpc"
+codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$EMBEDDED_SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$EMBEDDED_SPARKLE/Versions/B/Autoupdate"
+codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$EMBEDDED_SPARKLE/Versions/B/Updater.app"
+codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$EMBEDDED_SPARKLE"
 codesign \
     --force \
     --sign "$SIGN_ID" \
@@ -218,14 +243,76 @@ if [ "$NO_UPLOAD" = true ]; then
     exit 0
 fi
 
-echo "[7/7] Syncing site version, tagging $TAG, and uploading GitHub release to $GH_REPO..."
+echo "[7/7] Syncing site version & appcast, tagging $TAG, and uploading GitHub release to $GH_REPO..."
 SITE_INDEX="$ROOT/site/index.html"
+SITE_APPCAST="$ROOT/site/appcast.xml"
+SITE_UPDATED=false
+
 if [ -f "$SITE_INDEX" ]; then
     VERSION_TAG="$TAG" /usr/bin/perl -0777 -i -pe 's/(<span\b[^>]*\bdata-version\b[^>]*>)v?[0-9]+\.[0-9]+\.[0-9]+([^<]*<\/span>)/$1.$ENV{VERSION_TAG}.$2/ge' "$SITE_INDEX"
     if ! git -C "$ROOT" diff --quiet -- "$SITE_INDEX"; then
         git -C "$ROOT" add "$SITE_INDEX"
-        git -C "$ROOT" commit -m "Update site version to $TAG"
+        SITE_UPDATED=true
     fi
+fi
+
+if [ -x "$SPARKLE_SIGN_UPDATE" ] && [ -f "$SITE_APPCAST" ]; then
+    SIGN_OUTPUT=""
+    if [ -n "${SEAMSTRESS_SPARKLE_KEY_FILE:-}" ]; then
+        SIGN_OUTPUT="$("$SPARKLE_SIGN_UPDATE" --ed-key-file "$SEAMSTRESS_SPARKLE_KEY_FILE" "$RELEASE_DMG")"
+    elif command -v op >/dev/null 2>&1; then
+        SIGN_OUTPUT="$(op read -n "$SPARKLE_OP_ITEM/private-key" | "$SPARKLE_SIGN_UPDATE" --ed-key-file - "$RELEASE_DMG")"
+    fi
+
+    if [ -n "$SIGN_OUTPUT" ]; then
+        ED_SIG="$(printf '%s' "$SIGN_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+        DMG_LEN="$(printf '%s' "$SIGN_OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
+        DMG_URL="https://github.com/$GH_REPO/releases/download/$TAG/$APP_NAME-$VERSION.dmg"
+        PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+        MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP_BUNDLE/Contents/Info.plist")"
+
+        /usr/bin/python3 - "$SITE_APPCAST" "$VERSION" "$BUILD_NUMBER" "$DMG_URL" "$ED_SIG" "$DMG_LEN" "$PUB_DATE" "$MIN_OS" "https://github.com/$GH_REPO/releases/tag/$TAG" <<'PY'
+import re, sys
+
+path, version, build, url, sig, length, pub_date, min_os, notes_url = sys.argv[1:]
+with open(path, "r", encoding="utf-8") as f:
+    xml = f.read()
+
+# Remove any existing item for this exact version before inserting at the top
+xml = re.sub(
+    rf'\s*<item>\s*<title>Version {re.escape(version)}</title>.*?</item>',
+    '',
+    xml,
+    flags=re.DOTALL,
+)
+
+item = f"""    <item>
+      <title>Version {version}</title>
+      <pubDate>{pub_date}</pubDate>
+      <sparkle:version>{build}</sparkle:version>
+      <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>{min_os}</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>{notes_url}</sparkle:releaseNotesLink>
+      <enclosure url="{url}" length="{length}" type="application/octet-stream" sparkle:edSignature="{sig}"/>
+    </item>"""
+
+anchor = "<language>en</language>"
+if anchor not in xml:
+    raise SystemExit("Could not find <language>en</language> anchor in appcast.xml")
+
+xml = xml.replace(anchor, f"{anchor}\n{item}", 1)
+with open(path, "w", encoding="utf-8") as f:
+    f.write(xml)
+PY
+        if ! git -C "$ROOT" diff --quiet -- "$SITE_APPCAST"; then
+            git -C "$ROOT" add "$SITE_APPCAST"
+            SITE_UPDATED=true
+        fi
+    fi
+fi
+
+if [ "$SITE_UPDATED" = true ]; then
+    git -C "$ROOT" commit -m "Update site version and appcast for $TAG"
 fi
 
 if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then

@@ -85,6 +85,7 @@ final class AppState: ObservableObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appState = AppState()
     private let windowManager = WindowManager()
+    private let updaterController = UpdaterController()
 
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
@@ -165,7 +166,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pop = NSPopover()
         pop.behavior = .transient
         pop.contentViewController = NSHostingController(
-            rootView: MenuBarPopoverView(appState: appState, windowManager: windowManager)
+            rootView: MenuBarPopoverView(
+                appState: appState,
+                windowManager: windowManager,
+                updater: updaterController
+            )
         )
         popover = pop
     }
@@ -274,7 +279,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let hosting = NSHostingController(
-            rootView: MenuBarPopoverView(appState: appState, windowManager: windowManager)
+            rootView: MenuBarPopoverView(
+                appState: appState,
+                windowManager: windowManager,
+                updater: updaterController
+            )
         )
         let win = NSWindow(contentViewController: hosting)
         win.title = "Seamstress"

@@ -68,16 +68,43 @@ swift "$ROOT/Resources/generate-icon.swift" "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$BUILD_ROOT/AppIcon.icns"
 
 echo "[3/5] Assembling $APP_NAME.app bundle ($BUNDLE_ID)..."
+SPARKLE_FW="$BUILD_ROOT/spm/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+test -d "$SPARKLE_FW"
+
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks"
 cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP_BUNDLE/Contents/Info.plist"
 cp "$BUILD_ROOT/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+ditto "$SPARKLE_FW" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+
+SPARKLE_PUBLIC_KEY="${SEAMSTRESS_SPARKLE_PUBLIC_KEY:-$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true)}"
+if [ -z "$SPARKLE_PUBLIC_KEY" ] && command -v op >/dev/null 2>&1; then
+    SPARKLE_OP_ITEM="${SEAMSTRESS_SPARKLE_OP_ITEM:-op://Development/Seamstress Sparkle EdDSA}"
+    SPARKLE_PUBLIC_KEY="$(op read -n "$SPARKLE_OP_ITEM/public-key" 2>/dev/null || true)"
+fi
+if [ -n "$SPARKLE_PUBLIC_KEY" ]; then
+    /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_KEY" "$APP_BUNDLE/Contents/Info.plist"
+fi
+
+sign_sparkle() {
+    local fw="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+    local sign_flags=(--force --sign "$SIGN_ID")
+    if [ "$SIGN_ID" != "-" ]; then
+        sign_flags+=(--options runtime)
+    fi
+    codesign "${sign_flags[@]}" "$fw/Versions/B/XPCServices/Installer.xpc"
+    codesign "${sign_flags[@]}" "$fw/Versions/B/XPCServices/Downloader.xpc"
+    codesign "${sign_flags[@]}" "$fw/Versions/B/Autoupdate"
+    codesign "${sign_flags[@]}" "$fw/Versions/B/Updater.app"
+    codesign "${sign_flags[@]}" "$fw"
+}
 
 if [ "$SIGN_ID" = "-" ]; then
     echo "[4/5] Ad-hoc signing (no Developer ID Application identity configured)..."
     echo "      Note: Accessibility permission may need to be re-granted after rebuilds."
+    sign_sparkle
     codesign \
         --force \
         --sign - \
@@ -85,6 +112,7 @@ if [ "$SIGN_ID" = "-" ]; then
         "$APP_BUNDLE"
 else
     echo "[4/5] Signing with $SIGN_ID..."
+    sign_sparkle
     codesign \
         --force \
         --sign "$SIGN_ID" \

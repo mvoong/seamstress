@@ -5,6 +5,7 @@ import SwiftUI
 struct MenuBarPopoverView: View {
     @ObservedObject var appState: AppState
     @ObservedObject var windowManager: WindowManager
+    @ObservedObject var updater: UpdaterController
     @State private var hoveredLeafID: NodeID?
 
     var body: some View {
@@ -29,15 +30,24 @@ struct MenuBarPopoverView: View {
 
             Divider()
 
-            HStack {
+            HStack(spacing: 10) {
                 Text("v\(appVersion)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Quit Seamstress") {
+                if updater.isConfigured {
+                    Button("Check for Updates…") {
+                        updater.checkForUpdates()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .disabled(!updater.canCheckForUpdates)
+                }
+                Button("Quit") {
                     NSApp.terminate(nil)
                 }
                 .buttonStyle(.borderless)
+                .font(.caption)
                 .foregroundStyle(.red)
             }
         }
@@ -235,6 +245,14 @@ struct MenuBarPopoverView: View {
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(Color.accentColor)
                 }
+            }
+
+            if updater.isConfigured {
+                Toggle("Check for updates automatically", isOn: Binding(
+                    get: { updater.automaticallyChecksForUpdates },
+                    set: { updater.setAutomaticallyChecksForUpdates($0) }
+                ))
+                .font(.subheadline)
             }
         }
     }

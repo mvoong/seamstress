@@ -10,6 +10,9 @@ let package = Package(
         .library(name: "SeamstressCore", targets: ["SeamstressCore"]),
         .executable(name: "Seamstress", targets: ["Seamstress"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         .target(
             name: "SeamstressCore",
@@ -17,8 +20,14 @@ let package = Package(
         ),
         .executableTarget(
             name: "Seamstress",
-            dependencies: ["SeamstressCore"],
-            path: "Sources/Seamstress"
+            dependencies: [
+                "SeamstressCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            path: "Sources/Seamstress",
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
+            ]
         ),
         .testTarget(
             name: "SeamstressCoreTests",
