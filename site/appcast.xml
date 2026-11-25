@@ -5,5 +5,14 @@
     <link>https://seamstress.voong.io/</link>
     <description>Most recent releases of Seamstress for macOS.</description>
     <language>en</language>
+    <item>
+      <title>Version 0.1.2</title>
+      <pubDate>Wed, 25 Nov 2026 10:24:19 +0000</pubDate>
+      <sparkle:version>3</sparkle:version>
+      <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>https://github.com/mvoong/seamstress/releases/tag/v0.1.2</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/mvoong/seamstress/releases/download/v0.1.2/Seamstress-0.1.2.dmg" length="3246782" type="application/octet-stream" sparkle:edSignature="K+JCXIWUrslbcIYdp06htV0WhmKr6qtjTkHwiDQCjnw27rCdgXj0vUOucIm5p/VM62MFGs1c+P+yEaw82IWvCQ=="/>
+    </item>
   </channel>
 </rss>
