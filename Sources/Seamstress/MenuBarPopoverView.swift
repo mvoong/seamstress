@@ -247,6 +247,19 @@ struct MenuBarPopoverView: View {
                 }
             }
 
+            Toggle("Drag windows from anywhere (⌃⌘)", isOn: Binding(
+                get: { appState.dragFromAnywhere },
+                set: { appState.setDragFromAnywhere($0) }
+            ))
+            .font(.subheadline)
+
+            if appState.dragFromAnywhereNeedsRelaunch {
+                Text("Relaunch open apps for this macOS setting to take effect.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if updater.isConfigured {
                 Toggle("Check for updates automatically", isOn: Binding(
                     get: { updater.automaticallyChecksForUpdates },
@@ -259,7 +272,10 @@ struct MenuBarPopoverView: View {
 
     private var cheatSheet: some View {
         VStack(alignment: .leading, spacing: 4) {
-            row("⌥ / ⌃⌘ Drag", "Fill, split pane, T-junction, or swap center")
+            row("⌥ + Drag", "Tile, split pane, T-junction, or swap center")
+            if appState.dragFromAnywhere {
+                row("⌃⌘ + Drag", "Same as ⌥ + Drag, from anywhere in a window")
+            }
             row("Normal Drag", "Detach to floating & expand neighbors")
             row("Hover Seam", "Drag to resize (⇧ free) · 2× click 50%")
             row("Esc", "Undo active window drag or seam resize")

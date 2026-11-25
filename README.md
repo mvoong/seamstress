@@ -35,7 +35,7 @@ Try the interactive layout playground at **[seamstress.voong.io](https://seamstr
 | **Option-click / Right-click Menu Bar Icon** | Quickly toggles Seamstress between Active and Paused. |
 | **Menu Bar Minimap** | Shows live per-display app icons (click a tile to focus), **Equalize** (reset all splits to 50/50), and **Clear**. |
 
-Works passively with both standard titlebar dragging (`⌥` + drag) and macOS drag-anywhere gestures (`defaults write -g NSWindowShouldDragOnGesture -bool true`, where `⌃⌘` + drag anywhere in a window moves and snaps/splits directly).
+Works passively with both standard titlebar dragging (`⌥` + drag) and macOS drag-anywhere gestures (`⌃⌘` + drag anywhere inside a window — toggle **Drag windows from anywhere (`⌃⌘`)** in Seamstress's menu bar popover, or run `defaults write -g NSWindowShouldDragOnGesture -bool true`, then relaunch open apps).
 
 ## Architecture
 

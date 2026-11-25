@@ -10,6 +10,10 @@ final class AppState: ObservableObject {
     @Published var isAccessibilityTrusted: Bool = AXIsProcessTrusted()
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
     @Published var launchAtLoginRequiresApproval: Bool = (SMAppService.mainApp.status == .requiresApproval)
+    @Published var dragFromAnywhere: Bool = AppState.readDragFromAnywhere()
+    @Published var dragFromAnywhereNeedsRelaunch: Bool = false
+
+    private static let dragOnGestureKey = "NSWindowShouldDragOnGesture" as CFString
 
     var onEnabledChanged: ((Bool) -> Void)?
     var onShowMenuBarIconChanged: ((Bool) -> Void)?
@@ -78,6 +82,39 @@ final class AppState: ObservableObject {
             isAccessibilityTrusted = trusted
         }
         return trusted
+    }
+
+    static func readDragFromAnywhere() -> Bool {
+        CFPreferencesCopyValue(
+            dragOnGestureKey,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        ) as? Bool ?? false
+    }
+
+    func refreshDragFromAnywhere() {
+        let enabled = Self.readDragFromAnywhere()
+        if dragFromAnywhere != enabled {
+            dragFromAnywhere = enabled
+        }
+    }
+
+    func setDragFromAnywhere(_ enabled: Bool) {
+        CFPreferencesSetValue(
+            Self.dragOnGestureKey,
+            enabled ? kCFBooleanTrue : kCFBooleanFalse,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        )
+        CFPreferencesSynchronize(
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        )
+        dragFromAnywhere = enabled
+        dragFromAnywhereNeedsRelaunch = true
     }
 }
 
@@ -264,6 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button, let popover else { return }
         _ = appState.refreshTrust()
         appState.refreshLoginItemStatus()
+        appState.refreshDragFromAnywhere()
         windowManager.refreshForMenuPresentation()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
@@ -272,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showControlWindow() {
         _ = appState.refreshTrust()
         appState.refreshLoginItemStatus()
+        appState.refreshDragFromAnywhere()
         windowManager.refreshForMenuPresentation()
         if let existing = controlWindow {
             existing.makeKeyAndOrderFront(nil)
