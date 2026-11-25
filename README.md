@@ -55,6 +55,10 @@ Works passively with both standard titlebar dragging (`⌥` + drag) and macOS dr
 - **`OverlayPanel.swift`, `DropPreviewOverlay.swift` & `SeamHighlightOverlay.swift`**: Shared non-activating, click-through `NSPanel` overlays — frosted-glass drop preview with action badges (`Swap`, `Replace`, `Split All`) and smooth fade/morph transitions, plus seam hairlines, centered `┼` intersection knob, amber min-size clamping cues, and cursor re-assertion.
 - **`SeamDragController.swift`, `WindowDragController.swift`, `LayoutPersistence.swift`, `WindowManager.swift`, `MenuBarPopoverView.swift`, `AppDelegate.swift`**: `@MainActor`-isolated runtime coordinating seam and window drag controllers, persisted floating restore frames, Accessibility permission gate with live polling, interactive per-display minimap with pre-resolved app icons and Equalize/Clear actions, custom template menu bar icon (Option-click/right-click quick pause, optional hidden menu bar icon with standalone controls window), and launch-at-login (`SMAppService.mainApp` with approval-state surfacing).
 
+### `site/` (Static Website & Interactive Playground)
+- Zero-server, zero-build static site (`site/index.html`, `site/styles.css`, `site/favicon.svg`, `site/seamstress-core.js`, `site/playground.js`) that runs directly from `file://` or any static host.
+- Includes a live interactive macOS desktop sandbox porting `SeamstressCore` (`⌥`-drag snapping, T-junction splits, center swap/replace, flush seam and `┼` intersection resizing with magnetic detents and min-size clamping, `Esc` undo, quit-and-relaunch slot restore, and the menu bar minimap).
+
 ## Build, Test & Install
 
 Requirements: macOS 13+, Swift 5.9+ (Xcode Command Line Tools), and optionally a `Developer ID Application` signing identity for stable Accessibility permissions across rebuilds.

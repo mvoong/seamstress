@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seamstress — Mouse-Driven macOS Tiling Window Manager</title>
+  <meta name="description" content="A lightweight, mouse-driven macOS tiling window manager built around floating-by-default windows, Option-drag splitting, and real-time flush seam resizing.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="seamstress-core.js"></script>
+  <script defer src="playground.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a class="brand" href="#top">
+        <img src="favicon.svg" alt="" width="28" height="28">
+        <span>Seamstress</span>
+        <span class="version-pill">v0.1.1</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#sandbox">Try It</a>
+        <a href="#philosophy">Philosophy</a>
+        <a href="#gestures">Gestures</a>
+        <a href="#install">Download</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="btn btn-ghost" href="https://github.com/mvoong/seamstress" target="_blank" rel="noopener">GitHub</a>
+        <a class="btn btn-primary" href="https://github.com/mvoong/seamstress/releases/latest" target="_blank" rel="noopener">Download DMG</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" id="sandbox">
+      <div class="container">
+        <div class="hero-head">
+          <div class="hero-eyebrow">
+            <span class="dot" aria-hidden="true"></span>
+            Native macOS 13+ · Universal Binary · Zero SIP Changes
+          </div>
+          <h1>Tile on your terms.<br>Resize every seam.</h1>
+          <p class="hero-sub">
+            Floating by default, <kbd>⌥</kbd>-drag to snap or split, and drag any flush seam or <kbd>┼</kbd> intersection in real time. Try the live layout engine right here.
+          </p>
+        </div>
+
+        <!-- Live Interactive macOS Desktop Sandbox -->
+        <div class="sandbox-shell" aria-label="Interactive Seamstress layout playground">
+          <div class="sandbox-toolbar">
+            <div class="toolbar-group">
+              <button
+                type="button"
+                class="snap-toggle"
+                id="snap-toggle-btn"
+                aria-pressed="false"
+                title="Hold Option/Alt while dragging, or click to lock Snap Mode on"
+              >
+                <kbd>⌥</kbd>
+                <span>Snap Mode</span>
+                <span class="toggle-state" id="snap-toggle-state">OFF</span>
+              </button>
+              <span class="modifier-pill" id="shift-pill" title="Hold Shift while dragging a seam to bypass magnetic detents">
+                <kbd>⇧</kbd> Free Seam
+              </span>
+              <div class="segmented" role="group" aria-label="Layout presets">
+                <button type="button" data-preset="floating" class="is-selected">Floating</button>
+                <button type="button" data-preset="three-pane">3-Pane</button>
+                <button type="button" data-preset="grid-2x2">2×2 Grid (┼)</button>
+              </div>
+            </div>
+
+            <div class="toolbar-group">
+              <div class="status-readout" id="status-readout" aria-live="polite">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="status-text">Hold ⌥ and drag a window—or toggle Snap Mode</span>
+              </div>
+              <button type="button" class="icon-btn" id="reset-btn" title="Reset playground to default floating layout">
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div class="desktop-screen" id="desktop-screen">
+            <!-- Mock macOS Menu Bar -->
+            <div class="macos-menubar">
+              <div class="menubar-left">
+                <span class="menubar-apple" aria-hidden="true">
+                  <svg width="12" height="14" viewBox="0 0 14 17" fill="currentColor">
+                    <path d="M11.6 9.1c0-2 1.6-3 1.7-3.1-.9-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7-1.3 0-2.6.8-3.3 2-1.4 2.5-.4 6.1 1 8.1.7 1 1.5 2.1 2.5 2 1 0 1.4-.7 2.6-.7 1.2 0 1.6.7 2.6.7 1.1 0 1.8-1 2.4-2 .8-1.1 1.1-2.2 1.1-2.3 0-.1-2.1-.8-2.1-3.1zM9.6 3.2c.5-.7.9-1.6.8-2.5-.8 0-1.8.5-2.3 1.2-.5.6-.9 1.5-.8 2.4.9.1 1.8-.4 2.3-1.1z"/>
+                  </svg>
+                </span>
+                <span class="menubar-app-name" id="menubar-app-name">Editor</span>
+                <span class="menubar-item">File</span>
+                <span class="menubar-item">Edit</span>
+                <span class="menubar-item">View</span>
+                <span class="menubar-item">Window</span>
+              </div>
+              <div class="menubar-right">
+                <button
+                  type="button"
+                  class="menubar-seamstress-btn"
+                  id="menubar-seamstress-btn"
+                  aria-expanded="false"
+                  aria-controls="menubar-popover"
+                  title="Click for Minimap & Controls · Option-click or Right-click to Pause"
+                >
+                  <svg width="15" height="13" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.35">
+                    <rect x="1" y="1" width="14" height="12" rx="2.5"/>
+                    <line x1="8" y1="1" x2="8" y2="13"/>
+                    <line x1="8" y1="7" x2="15" y2="7"/>
+                  </svg>
+                </button>
+                <span class="menubar-clock" id="menubar-clock">Tue 9:41 AM</span>
+              </div>
+            </div>
+
+            <!-- Interactive Menu Bar Popover -->
+            <div class="menubar-popover" id="menubar-popover" hidden>
+              <div class="popover-head">
+                <div>
+                  <div class="popover-title">Seamstress</div>
+                  <div class="popover-sub" id="popover-status">Active · no tiled windows</div>
+                </div>
+                <button
+                  type="button"
+                  class="mac-switch is-on"
+                  id="popover-enabled-switch"
+                  role="switch"
+                  aria-checked="true"
+                  aria-label="Enable Seamstress"
+                ></button>
+              </div>
+
+              <div class="popover-divider"></div>
+
+              <div class="minimap-head">
+                <span>Current Space · Studio Display</span>
+                <div class="minimap-actions">
+                  <button type="button" id="minimap-equalize" disabled>Equalize</button>
+                  <button type="button" id="minimap-clear" disabled>Clear</button>
+                </div>
+              </div>
+              <div class="minimap-canvas" id="minimap-canvas">
+                <div class="minimap-empty-state">No tiled windows yet</div>
+              </div>
+
+              <div class="popover-divider"></div>
+
+              <div class="popover-cheatsheet">
+                <div class="popover-row">
+                  <span class="k">⌥ / ⌃⌘ Drag</span>
+                  <span class="d">Fill, split pane, T-junction, or swap center</span>
+                </div>
+                <div class="popover-row">
+                  <span class="k">Normal Drag</span>
+                  <span class="d">Detach to floating &amp; expand neighbors</span>
+                </div>
+                <div class="popover-row">
+                  <span class="k">Hover Seam</span>
+                  <span class="d">Drag to resize (⇧ free) · 2× click 50%</span>
+                </div>
+                <div class="popover-row">
+                  <span class="k">Esc</span>
+                  <span class="d">Undo active window drag or seam resize</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Workspace Area (below menu bar) -->
+            <div class="desktop-workspace" id="desktop-workspace">
+              <div class="empty-slots-layer" id="empty-slots-layer"></div>
+
+              <div class="windows-layer" id="windows-layer">
+                <!-- Window 1: Editor -->
+                <article class="mock-window" data-win-id="1" id="win-1">
+                  <div class="win-titlebar" data-drag-handle>
+                    <div class="traffic-lights">
+                      <button type="button" class="tl tl-close" data-close-win="1" aria-label="Close Editor"></button>
+                      <span class="tl tl-min"></span>
+                      <span class="tl tl-max"></span>
+                    </div>
+                    <span class="win-title">LayoutTree.swift — Editor</span>
+                    <span class="win-badge" data-badge>Float</span>
+                  </div>
+                  <div class="win-body">
+                    <div class="code-layout">
+                      <div class="code-sidebar">
+                        <div class="code-file">Geometry.swift</div>
+                        <div class="code-file is-active">LayoutTree.swift</div>
+                        <div class="code-file">DropPlanner.swift</div>
+                        <div class="code-file">SeamGeometry.swift</div>
+                        <div class="code-file">SpaceStore.swift</div>
+                      </div>
+                      <div class="code-editor"><span class="tok-cm">// Flush 0px BSP split node</span>
+<span class="tok-kw">public struct</span> <span class="tok-type">LayoutTree</span> {
+  <span class="tok-kw">public indirect enum</span> <span class="tok-type">Node</span> {
+    <span class="tok-kw">case</span> empty(id: <span class="tok-type">NodeID</span>)
+    <span class="tok-kw">case</span> window(id: <span class="tok-type">NodeID</span>, windowID: <span class="tok-type">WindowID</span>)
+    <span class="tok-kw">case</span> split(axis: <span class="tok-type">SplitAxis</span>, ratio: <span class="tok-type">CGFloat</span>)
+  }
+
+  <span class="tok-kw">mutating func</span> <span class="tok-fn">equalizeSplits</span>() {
+    <span class="tok-cm">// Reset all seams to 50/50</span>
+    ratio = <span class="tok-num">0.5</span>
+  }
+}</div>
+                    </div>
+                  </div>
+                </article>
+
+                <!-- Window 2: Terminal -->
+                <article class="mock-window" data-win-id="2" id="win-2">
+                  <div class="win-titlebar" data-drag-handle>
+                    <div class="traffic-lights">
+                      <button type="button" class="tl tl-close" data-close-win="2" aria-label="Close Terminal"></button>
+                      <span class="tl tl-min"></span>
+                      <span class="tl tl-max"></span>
+                    </div>
+                    <span class="win-title">zsh — ~/Projects/seamstress</span>
+                    <span class="win-badge" data-badge>Float</span>
+                  </div>
+                  <div class="win-body">
+                    <div class="term-body">
+                      <div><span class="term-prompt">➜ seamstress</span> swift test</div>
+                      <div class="term-dim">Building for debugging...</div>
+                      <div class="term-ok">✔ Test Suite 'SeamstressCoreTests' passed</div>
+                      <div class="term-dim">  Executed 79 tests, 0 failures (0.028s)</div>
+                      <div style="margin-top:8px"><span class="term-prompt">➜ seamstress</span> ./scripts/install.sh</div>
+                      <div>Signed with Developer ID Application</div>
+                      <div class="term-ok">Installed /Applications/Seamstress.app</div>
+                      <div style="margin-top:8px"><span class="term-prompt">➜ seamstress</span> <span style="opacity:.7">▍</span></div>
+                    </div>
+                  </div>
+                </article>
+
+                <!-- Window 3: Safari -->
+                <article class="mock-window" data-win-id="3" id="win-3">
+                  <div class="win-titlebar" data-drag-handle>
+                    <div class="traffic-lights">
+                      <button type="button" class="tl tl-close" data-close-win="3" aria-label="Close Safari"></button>
+                      <span class="tl tl-min"></span>
+                      <span class="tl tl-max"></span>
+                    </div>
+                    <span class="win-title">Safari — Seamstress Docs</span>
+                    <span class="win-badge" data-badge>Float</span>
+                  </div>
+                  <div class="win-body">
+                    <div class="browser-body">
+                      <div class="browser-bar">
+                        <div class="browser-url">github.com/mvoong/seamstress</div>
+                      </div>
+                      <div class="browser-content">
+                        <h4>Flush 0px Tiling for macOS</h4>
+                        <p>Drag near any edge with ⌥ held to split a pane, aim at a T-junction (┬ ┴ ├ ┤) to split an entire container, or drop in the center to swap.</p>
+                        <div class="browser-tags">
+                          <span class="browser-tag">0px Seams</span>
+                          <span class="browser-tag">Native Spaces</span>
+                          <span class="browser-tag">SIP-Safe</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <!-- Window 4: Notes -->
+                <article class="mock-window" data-win-id="4" id="win-4">
+                  <div class="win-titlebar" data-drag-handle>
+                    <div class="traffic-lights">
+                      <button type="button" class="tl tl-close" data-close-win="4" aria-label="Close Notes"></button>
+                      <span class="tl tl-min"></span>
+                      <span class="tl tl-max"></span>
+                    </div>
+                    <span class="win-title">Notes — Release v0.1.1</span>
+                    <span class="win-badge" data-badge>Float</span>
+                  </div>
+                  <div class="win-body">
+                    <div class="notes-body">
+                      <div class="notes-heading">Seamstress Notes</div>
+                      <ul class="notes-list">
+                        <li><span class="notes-check done"></span> Close a tiled window → neighbors expand</li>
+                        <li><span class="notes-check done"></span> Reopen from dock → restores exact slot</li>
+                        <li><span class="notes-check done"></span> Double-click seam → resets to 50/50</li>
+                        <li><span class="notes-check"></span> Drag ┼ corner → 2-axis live resize</li>
+                      </ul>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <!-- Drop Preview Overlay -->
+              <div class="drop-preview" id="drop-preview">
+                <div class="drop-preview-badge" id="drop-preview-badge" hidden></div>
+              </div>
+
+              <!-- Seam Highlight & Intersection Overlay -->
+              <div class="seam-overlay" id="seam-overlay"></div>
+            </div>
+          </div>
+
+          <div class="sandbox-footer">
+            <div class="dock-pills" id="dock-pills">
+              <span class="dock-label">Windows (click to focus / reopen):</span>
+              <button type="button" class="dock-pill is-open" data-dock-win="1"><span class="open-dot"></span>Editor</button>
+              <button type="button" class="dock-pill is-open" data-dock-win="2"><span class="open-dot"></span>Terminal</button>
+              <button type="button" class="dock-pill is-open" data-dock-win="3"><span class="open-dot"></span>Safari</button>
+              <button type="button" class="dock-pill is-closed" data-dock-win="4"><span class="open-dot"></span>Notes</button>
+            </div>
+            <div style="font-size:11.5px; color:var(--text-dim);">
+              Tip: Close a tiled window (<span style="color:#ff5f57">●</span>) &amp; click it above to test quit-and-relaunch restore · Press <kbd>Esc</kbd> mid-drag to undo
+            </div>
+          </div>
+        </div>
+
+        <!-- Guided 4-Step Gesture Checklist -->
+        <div class="checklist-bar" id="checklist-bar" aria-label="Interactive gesture checklist">
+          <div class="check-step" data-check="snap">
+            <span class="check-icon">1</span>
+            <div>
+              <div class="check-title">Snap a window</div>
+              <div class="check-desc">Hold <kbd>⌥</kbd> (or toggle Snap) &amp; drag into the desktop</div>
+            </div>
+          </div>
+          <div class="check-step" data-check="split">
+            <span class="check-icon">2</span>
+            <div>
+              <div class="check-title">Split a pane or T-junction</div>
+              <div class="check-desc"><kbd>⌥</kbd>-drag onto an occupied edge or <kbd>┬</kbd>/<kbd>├</kbd> junction</div>
+            </div>
+          </div>
+          <div class="check-step" data-check="seam">
+            <span class="check-icon">3</span>
+            <div>
+              <div class="check-title">Resize a flush seam</div>
+              <div class="check-desc">Hover &amp; drag any seam or <kbd>┼</kbd> corner (<kbd>⇧</kbd> free)</div>
+            </div>
+          </div>
+          <div class="check-step" data-check="swapOrDetach">
+            <span class="check-icon">4</span>
+            <div>
+              <div class="check-title">Swap or detach</div>
+              <div class="check-desc">Center <kbd>⌥</kbd>-drag to swap, or normal-drag to float</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Design Philosophy -->
+    <section class="section" id="philosophy">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">Design Philosophy</div>
+          <h2>Tiling when you want it.<br>macOS everywhere else.</h2>
+          <p>Seamstress stays invisible until you reach for a tile or a seam—no tiling daemon hijacking dialogs, no virtual desktops fighting Mission Control.</p>
+        </div>
+
+        <div class="pillars-grid">
+          <article class="pillar-card">
+            <div class="pillar-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                <rect x="2.5" y="3.5" width="9" height="7" rx="1.8"/>
+                <rect x="8.5" y="9.5" width="9" height="7" rx="1.8"/>
+              </svg>
+            </div>
+            <h3>Unmanaged by default</h3>
+            <p>New windows open wherever macOS puts them. Seamstress never rearranges windows until you explicitly <kbd>⌥</kbd>-drag them into a layout.</p>
+          </article>
+
+          <article class="pillar-card">
+            <div class="pillar-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                <rect x="2.5" y="3" width="15" height="14" rx="2"/>
+                <line x1="10" y1="3" x2="10" y2="17"/>
+                <line x1="10" y1="10" x2="17.5" y2="10"/>
+              </svg>
+            </div>
+            <h3>Relaunch layout adoption</h3>
+            <p>On startup and first visit to each Space, Seamstress reconstructs existing flush-tiled layouts into live BSP trees—and restores quit apps back to their exact slots.</p>
+          </article>
+
+          <article class="pillar-card">
+            <div class="pillar-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M10 2.5L16.5 5.5V10.2C16.5 13.9 13.7 16.9 10 17.8C6.3 16.9 3.5 13.9 3.5 10.2V5.5L10 2.5Z"/>
+                <path d="M7.3 10.2L9.2 12.1L13 8.3"/>
+              </svg>
+            </div>
+            <h3>Native Spaces &amp; SIP-safe</h3>
+            <p>Each display and native macOS Space maintains its own 0px-gap BSP tree using read-only Space queries. System Integrity Protection stays completely enabled.</p>
+          </article>
+
+          <article class="pillar-card">
+            <div class="pillar-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M11.5 2.5L4.5 11H10L8.5 17.5L15.5 9H10L11.5 2.5Z"/>
+              </svg>
+            </div>
+            <h3>Zero idle IPC</h3>
+            <p>Idle mouse movement performs zero Accessibility calls. Live seam resizing runs off the main thread on per-PID coalesced queues so sluggish apps never stall your cursor.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Gesture Reference -->
+    <section class="section" id="gestures">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">Interactions</div>
+          <h2>Every gesture, tuned for muscle memory</h2>
+          <p>Works natively with standard titlebar dragging (<kbd>⌥</kbd> + drag) and macOS drag-anywhere gestures (<kbd>⌃⌘</kbd> + drag).</p>
+        </div>
+
+        <div class="gestures-grid">
+          <div class="gesture-card">
+            <h3>Snapping &amp; Splitting</h3>
+            <ul class="gesture-list">
+              <li>
+                <span class="gesture-trigger"><kbd>⌥</kbd> / <kbd>⌃⌘</kbd> + Drag (empty)</span>
+                <span class="gesture-effect">Center fills 100%; near an edge takes 50% and leaves an empty slot.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger"><kbd>⌥</kbd> + Drag (occupied edge)</span>
+                <span class="gesture-effect">Splits that pane 50/50 along the targeted side.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger"><kbd>⌥</kbd> + Drag near T-junction</span>
+                <span class="gesture-effect">Splits the entire parent split container (<kbd>┬</kbd> <kbd>┴</kbd> <kbd>├</kbd> <kbd>┤</kbd>) across both child panes.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger"><kbd>⌥</kbd> + Drag (center 36%)</span>
+                <span class="gesture-effect">Swaps two tiled windows, or replaces a tiled pane with a floating window.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger"><kbd>⌥</kbd> + Drag onto own edge</span>
+                <span class="gesture-effect">Shrinks a tiled window to that half, leaving the opposite half empty.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="gesture-card">
+            <h3>Seams, Intersections &amp; Detents</h3>
+            <ul class="gesture-list">
+              <li>
+                <span class="gesture-trigger">Hover flush seam</span>
+                <span class="gesture-effect">Highlights a hairline + grip pill (suppressed whenever a floating window covers it).</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Drag seam or <kbd>┼</kbd> knob</span>
+                <span class="gesture-effect">Resizes all affected panes in real time—1-axis or simultaneous 2-axis at corners.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Magnetic detents (<kbd>⇧</kbd> free)</span>
+                <span class="gesture-effect">Snaps at 50%, ⅓, ⅔, and co-linear seams, with amber clamping &amp; Force Touch haptics at window min sizes.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Drag &gt; 90% into empty</span>
+                <span class="gesture-effect">Previews and collapses the empty slot on release, expanding the occupied side.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Double-click seam</span>
+                <span class="gesture-effect">Collapses an adjacent empty slot, or resets an occupied split to 50/50.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="gesture-card">
+            <h3>Detaching &amp; Undo</h3>
+            <ul class="gesture-list">
+              <li>
+                <span class="gesture-trigger">Normal Drag (no <kbd>⌥</kbd>)</span>
+                <span class="gesture-effect">Detaches back to saved floating size anchored under your cursor and expands neighbors. Press <kbd>⌥</kbd> within 0.45s to restore.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Release <kbd>⌥</kbd> mid-drag</span>
+                <span class="gesture-effect">Cancels the drop preview immediately and lets the window drop as floating.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger"><kbd>Esc</kbd> while dragging</span>
+                <span class="gesture-effect">Undoes an active window drag or seam resize while still holding the mouse button.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Close / Quit tiled app</span>
+                <span class="gesture-effect">Auto-collapses its split. Relaunching a quit app restores its exact slot &amp; ratio if the Space hasn't changed.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="gesture-card">
+            <h3>Menu Bar &amp; Safety</h3>
+            <ul class="gesture-list">
+              <li>
+                <span class="gesture-trigger">Menu Bar Minimap</span>
+                <span class="gesture-effect">Live per-display app icons (click to focus), plus <strong>Equalize</strong> and <strong>Clear</strong>.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger"><kbd>⌥</kbd>-click / Right-click icon</span>
+                <span class="gesture-effect">Quickly toggles Seamstress between Active and Paused.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Option-click protection</span>
+                <span class="gesture-effect">Prevents macOS's native Option-click-to-hide from hiding and evicting unfocused tiled windows.</span>
+              </li>
+              <li>
+                <span class="gesture-trigger">Sleep &amp; lock resilient</span>
+                <span class="gesture-effect">Pauses sanity sweeps while displays sleep or the screen is locked so layouts stay intact.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download & Install -->
+    <section class="section" id="install">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">Get Seamstress</div>
+          <h2>Ready in thirty seconds</h2>
+          <p>Free, open source under the MIT license, and distributed as a signed, notarized universal macOS app.</p>
+        </div>
+
+        <div class="install-grid">
+          <div class="download-card">
+            <div>
+              <h3>Download Seamstress v0.1.1</h3>
+              <p style="margin:0; color:var(--text-muted); font-size:14px;">
+                Drag <strong>Seamstress.app</strong> into Applications, launch it, and grant Accessibility access—Seamstress picks up the permission automatically with no relaunch required.
+              </p>
+              <div class="download-meta">
+                <span class="meta-chip">macOS 13 Ventura or later</span>
+                <span class="meta-chip">Apple Silicon + Intel</span>
+                <span class="meta-chip">Signed &amp; Notarized DMG</span>
+                <span class="meta-chip">MIT License</span>
+              </div>
+            </div>
+
+            <ol class="install-steps">
+              <li>Download the latest universal <strong>.dmg</strong> from GitHub Releases.</li>
+              <li>Copy <strong>Seamstress.app</strong> to <strong>/Applications</strong> and open it.</li>
+              <li>Enable Seamstress in <strong>System Settings → Privacy &amp; Security → Accessibility</strong>.</li>
+            </ol>
+
+            <div class="download-actions">
+              <a class="btn btn-primary btn-lg" href="https://github.com/mvoong/seamstress/releases/latest" target="_blank" rel="noopener">
+                Download Seamstress.dmg
+              </a>
+              <a class="btn btn-ghost btn-lg" href="https://github.com/mvoong/seamstress/blob/main/CHANGELOG.md" target="_blank" rel="noopener">
+                Release Notes
+              </a>
+            </div>
+          </div>
+
+          <div class="source-card">
+            <div>
+              <h3>Or build from source</h3>
+              <p style="margin:0; color:var(--text-muted); font-size:14px;">
+                Pure Swift 5.9+ with zero third-party packages. Core layout logic runs headless in ~10ms.
+              </p>
+            </div>
+
+            <pre class="code-block"><code><span class="cm"># Clone and run pure Swift unit tests (~10ms)</span>
+git clone https://github.com/mvoong/seamstress.git
+cd seamstress
+swift test
+
+<span class="cm"># Build Release, sign, verify, and install</span>
+./scripts/install.sh
+open /Applications/Seamstress.app</code></pre>
+
+            <div style="font-size:12.5px; color:var(--text-dim);">
+              Optional: enable macOS drag-anywhere with <code style="font-family:var(--font-mono); color:var(--text-muted);">defaults write -g NSWindowShouldDragOnGesture -bool true</code> to snap with <kbd>⌃⌘</kbd> + drag anywhere inside a window.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="brand" style="font-size:13.5px; color:var(--text-muted);">
+        <img src="favicon.svg" alt="" width="20" height="20">
+        <span>Seamstress · MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/mvoong/seamstress" target="_blank" rel="noopener">Repository</a>
+        <a href="https://github.com/mvoong/seamstress/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/mvoong/seamstress/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        <a href="https://github.com/mvoong/seamstress/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
