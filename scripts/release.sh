@@ -161,9 +161,13 @@ if [ "$NO_UPLOAD" = false ]; then
 fi
 
 KEY_FILE=""
+NOTES_FILE=""
 cleanup() {
     if [ -n "$KEY_FILE" ] && [ -f "$KEY_FILE" ]; then
         rm -f "$KEY_FILE"
+    fi
+    if [ -n "$NOTES_FILE" ] && [ -f "$NOTES_FILE" ]; then
+        rm -f "$NOTES_FILE"
     fi
     rm -rf "$DMG_STAGE"
 }
@@ -373,7 +377,32 @@ fi
 
 git -C "$ROOT" push "$REMOTE" HEAD "$TAG"
 
-GH_ARGS=(release create "$TAG" "$RELEASE_DMG" --repo "$GH_REPO" --title "$APP_NAME $VERSION" --generate-notes)
+GH_ARGS=(release create "$TAG" "$RELEASE_DMG" --repo "$GH_REPO" --title "$APP_NAME $VERSION")
+
+CHANGELOG_FILE="$ROOT/CHANGELOG.md"
+if [ -f "$CHANGELOG_FILE" ]; then
+    NOTES_FILE="$(mktemp)"
+    /usr/bin/python3 - "$CHANGELOG_FILE" "$VERSION" "$NOTES_FILE" <<'PY'
+import re, sys
+
+changelog_path, version, out_path = sys.argv[1:]
+with open(changelog_path, "r", encoding="utf-8") as f:
+    text = f.read()
+
+pattern = rf'^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]:\s|\Z)'
+m = re.search(pattern, text, flags=re.MULTILINE | re.DOTALL)
+body = m.group(1).strip() if m else ""
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(body)
+PY
+fi
+
+if [ -n "$NOTES_FILE" ] && [ -s "$NOTES_FILE" ]; then
+    GH_ARGS+=(--notes-file "$NOTES_FILE")
+else
+    GH_ARGS+=(--generate-notes)
+fi
+
 if [ "$DRAFT" = true ]; then
     GH_ARGS+=(--draft)
 fi
