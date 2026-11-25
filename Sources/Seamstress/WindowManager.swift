@@ -931,13 +931,19 @@ final class WindowManager: ObservableObject {
                 continue
             }
             if let key = store.spaceKey(for: wid),
-               let display = displayObserver.display(for: key),
-               display.isNativeFullscreen(snap.bounds) {
-                if let space = store.handleWindowUnavailable(wid) {
-                    SeamstressLog.layout.info("Sanity sweep cleared fullscreen window \(wid) in \(space.description, privacy: .public)")
-                    affectedSpaces.insert(space)
+               let display = displayObserver.display(for: key) {
+                let center = CGPoint(x: snap.bounds.midX, y: snap.bounds.midY)
+                let movedToOtherDisplay = displayObserver.displays.count > 1
+                    && !display.fullFrameCG.contains(center)
+                    && displayObserver.display(containing: center) != nil
+                if display.isNativeFullscreen(snap.bounds) || movedToOtherDisplay {
+                    if let space = store.handleWindowUnavailable(wid) {
+                        let reason = movedToOtherDisplay ? "moved-display" : "fullscreen"
+                        SeamstressLog.layout.info("Sanity sweep cleared \(reason, privacy: .public) window \(wid) in \(space.description, privacy: .public)")
+                        affectedSpaces.insert(space)
+                    }
+                    axBridge.forget(windowID: wid)
                 }
-                axBridge.forget(windowID: wid)
             }
         }
 

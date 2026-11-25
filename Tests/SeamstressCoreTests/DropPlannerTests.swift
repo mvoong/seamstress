@@ -464,4 +464,38 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(emptySplit?.action, .splitEmpty(leafID: emptyLeafID, edge: .bottom))
         XCTAssertEqual(emptySplit?.previewKind, .split)
     }
+
+    func testSameSpaceMoveToNonSiblingEmptySlotProducesWYSIWYGPreviewRect() {
+        // Layout: [ [ 10 (0..250) | Empty (250..500) ] | 20 (500..1000) ]
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 10)
+        tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .right, with: 20)
+        tree.shrinkToEdge(leafID: tree.leafID(for: 10)!, edge: .left)
+        let emptyLeafID = tree.leaf(at: CGPoint(x: 375, y: 400), in: screen)!.leafID
+
+        // Dragging 20 to center of Empty collapses 20's old right half, so 20 lands in 500..1000.
+        let fillPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 375, y: 400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(fillPlan?.action, .fillEmpty(leafID: emptyLeafID))
+        XCTAssertEqual(fillPlan?.previewKind, .fill)
+        XCTAssertEqual(fillPlan?.previewRect, CGRect(x: 500, y: 0, width: 500, height: 800))
+
+        // Dragging 20 to left edge of Empty collapses 20's old right half and splits the expanded
+        // 500..1000 region, placing 20 in 500..750.
+        let splitPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 260, y: 400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(splitPlan?.action, .splitEmpty(leafID: emptyLeafID, edge: .left))
+        XCTAssertEqual(splitPlan?.previewKind, .split)
+        XCTAssertEqual(splitPlan?.previewRect, CGRect(x: 500, y: 0, width: 250, height: 800))
+    }
 }

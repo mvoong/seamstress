@@ -130,4 +130,39 @@ final class LayoutTreeTests: XCTestCase {
         XCTAssertEqual(frames[102], CGRect(x: 800, y: 25, width: 800, height: 488))
         XCTAssertEqual(frames[103], CGRect(x: 800, y: 513, width: 800, height: 487))
     }
+
+    func testRemoveWindowAndCollapseDoesNotPromoteEmptySiblingIntoMiddleGap() {
+        // Layout: [ 101 | [ [ 102 | Empty ] | 103 ] ]
+        // Closing 102 must NOT promote Empty into a phantom middle slot; 103 should expand to fill the right half.
+        var tree = LayoutTree()
+        tree.fillEmpty(leafID: tree.root.id, with: 101)
+        tree.splitOccupied(leafID: tree.leafID(for: 101)!, edge: .right, with: 103)
+        tree.splitOccupied(leafID: tree.leafID(for: 103)!, edge: .left, with: 102)
+        tree.shrinkToEdge(leafID: tree.leafID(for: 102)!, edge: .left)
+
+        XCTAssertTrue(tree.removeWindowAndCollapse(102))
+
+        let leaves = tree.leafPlacements(in: screen)
+        XCTAssertEqual(leaves.count, 2)
+        XCTAssertTrue(leaves.allSatisfy { !$0.isEmpty })
+        XCTAssertEqual(tree.windowFrames(in: screen)[101], CGRect(x: 0, y: 25, width: 800, height: 975))
+        XCTAssertEqual(tree.windowFrames(in: screen)[103], CGRect(x: 800, y: 25, width: 800, height: 975))
+    }
+
+    func testRemoveWindowAndCollapsePreservesUnrelatedEmptySlot() {
+        // Layout: [ [ 101 | 102 ] | Empty ]
+        // Closing 102 expands 101 to fill the left half while keeping the unrelated right empty slot intact.
+        var tree = LayoutTree()
+        tree.splitEmpty(leafID: tree.root.id, edge: .left, with: 101)
+        tree.splitOccupied(leafID: tree.leafID(for: 101)!, edge: .right, with: 102)
+
+        XCTAssertTrue(tree.removeWindowAndCollapse(102))
+
+        let leaves = tree.leafPlacements(in: screen)
+        XCTAssertEqual(leaves.count, 2)
+        XCTAssertEqual(leaves[0].windowID, 101)
+        XCTAssertEqual(leaves[0].frame, CGRect(x: 0, y: 25, width: 800, height: 975))
+        XCTAssertTrue(leaves[1].isEmpty)
+        XCTAssertEqual(leaves[1].frame, CGRect(x: 800, y: 25, width: 800, height: 975))
+    }
 }

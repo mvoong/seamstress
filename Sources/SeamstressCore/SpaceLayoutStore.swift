@@ -225,12 +225,19 @@ public final class SpaceLayoutStore {
             store(t, for: targetSpace)
 
         case .fillEmpty(let leafID):
-            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: false) { t in
+            let preserveSiblingEmpty: Bool
+            if sourceSpace == targetSpace {
+                let t = tree(for: targetSpace)
+                preserveSiblingEmpty = t.leafID(for: draggedWindowID).map { t.areDirectSiblings($0, leafID) } ?? false
+            } else {
+                preserveSiblingEmpty = false
+            }
+            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: !preserveSiblingEmpty) { t in
                 t.fillEmpty(leafID: leafID, with: draggedWindowID)
             }
 
         case .splitEmpty(let leafID, let edge):
-            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: false) { t in
+            moveWindow(draggedWindowID, from: sourceSpace, to: targetSpace, collapseOld: true) { t in
                 t.splitEmpty(leafID: leafID, edge: edge, ratio: plan.splitRatio, with: draggedWindowID)
             }
 

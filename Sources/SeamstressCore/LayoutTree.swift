@@ -94,6 +94,20 @@ public struct LayoutTree: Equatable, Sendable {
         findNode(withID: targetID, in: root)
     }
 
+    /// Returns true if `a` and `b` are the two direct children of the same `.split` node.
+    public func areDirectSiblings(_ a: NodeID, _ b: NodeID) -> Bool {
+        guard a != b else { return false }
+        return containsDirectSiblings(a, b, in: root)
+    }
+
+    private func containsDirectSiblings(_ a: NodeID, _ b: NodeID, in node: Node) -> Bool {
+        guard case .split(_, _, _, let first, let second) = node else { return false }
+        if (first.id == a && second.id == b) || (first.id == b && second.id == a) {
+            return true
+        }
+        return containsDirectSiblings(a, b, in: first) || containsDirectSiblings(a, b, in: second)
+    }
+
     private func findNode(withID targetID: NodeID, in node: Node) -> Node? {
         if node.id == targetID { return node }
         guard case .split(_, _, _, let first, let second) = node else { return nil }
@@ -376,9 +390,9 @@ public struct LayoutTree: Equatable, Sendable {
             case (nil, nil):
                 return nil
             case (let surviving?, nil):
-                return surviving
+                return surviving.isCompletelyEmpty ? nil : surviving
             case (nil, let surviving?):
-                return surviving
+                return surviving.isCompletelyEmpty ? nil : surviving
             case (let f?, let s?):
                 return .split(id: id, axis: axis, ratio: ratio, first: f, second: s)
             }

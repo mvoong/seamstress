@@ -122,10 +122,24 @@ public enum DropPlanner {
 
         // Case 1: Empty space (either empty screen or empty BSP slot)
         if leaf.isEmpty {
+            let oldLeafID = tree.leafID(for: draggedWindowID)
+            let effectiveCellForCollapse: CGRect
+            if let oldLeafID {
+                var simulated = tree
+                if simulated.fillEmpty(leafID: leaf.leafID, with: draggedWindowID) {
+                    simulated.removeLeafAndCollapse(leafID: oldLeafID)
+                    effectiveCellForCollapse = simulated.windowFrames(in: screenBounds)[draggedWindowID] ?? cell
+                } else {
+                    effectiveCellForCollapse = cell
+                }
+            } else {
+                effectiveCellForCollapse = cell
+            }
+
             for edge in edgeBandCandidates(point: pointer, in: cell, fraction: emptyEdgeFraction, maxPixels: maxEmptyEdgePixels) {
                 let winMin = draggedMinForAxis(edge.axis)
                 let emptyMin = SeamGeometry.defaultMinLeafDimension
-                let parentLength = cell.span(along: edge.axis)
+                let parentLength = effectiveCellForCollapse.span(along: edge.axis)
                 let firstMin = edge.isFirstChild ? winMin : emptyMin
                 let secondMin = edge.isFirstChild ? emptyMin : winMin
                 if let ratio = feasibleSplitRatio(
@@ -133,7 +147,15 @@ public enum DropPlanner {
                     firstMinPx: firstMin,
                     secondMinPx: secondMin
                 ) {
-                    let preview = splitRect(of: cell, edge: edge, ratio: ratio)
+                    let fallbackPreview = splitRect(of: effectiveCellForCollapse, edge: edge, ratio: ratio)
+                    let preview = simulatedPreviewRect(
+                        tree: tree,
+                        draggedWindowID: draggedWindowID,
+                        screenBounds: screenBounds,
+                        fallback: fallbackPreview
+                    ) { simulated in
+                        simulated.splitEmpty(leafID: leaf.leafID, edge: edge, ratio: ratio, with: draggedWindowID)
+                    }
                     return DropPlan(
                         targetSpace: targetSpace,
                         action: .splitEmpty(leafID: leaf.leafID, edge: edge),
@@ -143,10 +165,11 @@ public enum DropPlanner {
                     )
                 }
             }
+            let collapsesOldOnFill = oldLeafID.map { !tree.areDirectSiblings($0, leaf.leafID) } ?? false
             return DropPlan(
                 targetSpace: targetSpace,
                 action: .fillEmpty(leafID: leaf.leafID),
-                previewRect: cell,
+                previewRect: collapsesOldOnFill ? effectiveCellForCollapse : cell,
                 previewKind: .fill
             )
         }

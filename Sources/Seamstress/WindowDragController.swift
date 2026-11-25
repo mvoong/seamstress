@@ -358,7 +358,17 @@ final class WindowDragController {
         guard current.phase == .moving, snapModifierDown else { return }
 
         let plan = computeDropPlan(at: point, draggedWindowID: current.window.windowID) ?? current.currentPlan
-        guard let plan else { return }
+        guard let plan else {
+            // If a tiled window was Option-dragged and released without a valid drop target
+            // (e.g. inside the menu bar before any drop zone was entered), snap it back to its
+            // tiled slot so it cannot remain visually displaced and leave a phantom gap.
+            if let space = store.spaceKey(for: current.window.windowID),
+               let bounds = displayObserver.usableBounds(for: space),
+               let rect = store.frames(for: space, screenBounds: bounds)[current.window.windowID] {
+                axBridge.applyFrames([current.window.windowID: rect], crossMonitorSafe: true)
+            }
+            return
+        }
 
         let commit = store.commitDrop(
             plan,

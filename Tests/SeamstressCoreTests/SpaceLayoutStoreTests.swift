@@ -289,4 +289,73 @@ final class SpaceLayoutStoreTests: XCTestCase {
         _ = store.detachByUserDrag(windowID: 1, currentFrame: boundsA, cursor: CGPoint(x: 500, y: 20))
         XCTAssertEqual(store.learnedMinSizes[1], CGSize(width: 720, height: 532))
     }
+
+    func testSameSpaceMoveToNonSiblingEmptySlotCollapsesOldSlotWithoutPhantomGap() {
+        let store = SpaceLayoutStore()
+        // Build [ [ 1 (0..250) | Empty (250..500) ] | 2 (500..1000) ]
+        let p1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+        let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+        let pShrink = store.planDrop(pointer: CGPoint(x: 20, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(pShrink, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+
+        // Option-drag window 2 into the middle empty slot (250..500)
+        let movePlan = store.planDrop(pointer: CGPoint(x: 375, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        let commit = store.commitDrop(movePlan, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+
+        // No phantom empty slot left behind; 1 and 2 split the full screen 50/50, matching the preview rect.
+        let leaves = store.tree(for: spaceA).leafPlacements(in: boundsA)
+        XCTAssertEqual(leaves.count, 2)
+        XCTAssertTrue(leaves.allSatisfy { !$0.isEmpty })
+        XCTAssertEqual(commit.framesToApply[1], CGRect(x: 0, y: 0, width: 500, height: 800))
+        XCTAssertEqual(commit.framesToApply[2], CGRect(x: 500, y: 0, width: 500, height: 800))
+        XCTAssertEqual(movePlan.previewRect, commit.framesToApply[2])
+    }
+
+    func testCrossSpaceMoveToEmptySlotCollapsesSourceSpace() {
+        let store = SpaceLayoutStore()
+        // Monitor A: [ 1 | 2 ], Monitor B: empty
+        let p1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+        let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+
+        // Option-drag window 1 from Monitor A to empty Monitor B (center -> .fillEmpty)
+        let moveToB = store.planDrop(pointer: CGPoint(x: 1600, y: 400), draggedWindowID: 1, targetSpace: spaceB, screenBounds: boundsB)!
+        let commit = store.commitDrop(moveToB, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+
+        // Window 2 must expand to 100% of Monitor A instead of leaving a phantom empty half.
+        XCTAssertEqual(store.tree(for: spaceA).leafPlacements(in: boundsA).count, 1)
+        XCTAssertEqual(commit.framesToApply[2], boundsA)
+        XCTAssertEqual(commit.framesToApply[1], boundsB)
+
+        // Same check for cross-space .splitEmpty (edge drop onto another monitor)
+        let store2 = SpaceLayoutStore()
+        let q1 = store2.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store2.commitDrop(q1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+        let q2 = store2.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store2.commitDrop(q2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+        let edgeMoveToB = store2.planDrop(pointer: CGPoint(x: 1030, y: 400), draggedWindowID: 1, targetSpace: spaceB, screenBounds: boundsB)!
+        let edgeCommit = store2.commitDrop(edgeMoveToB, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+        XCTAssertEqual(store2.tree(for: spaceA).leafPlacements(in: boundsA).count, 1)
+        XCTAssertEqual(edgeCommit.framesToApply[2], boundsA)
+        XCTAssertEqual(edgeCommit.framesToApply[1], CGRect(x: 1000, y: 0, width: 600, height: 800))
+    }
+
+    func testClosingWindowAdjacentToEmptySlotCollapsesEmptySlotAndExpandsNeighbor() {
+        let store = SpaceLayoutStore()
+        // Build [ [ 1 (0..250) | Empty (250..500) ] | 2 (500..1000) ]
+        let p1 = store.planDrop(pointer: CGPoint(x: 500, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+        let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
+        let pShrink = store.planDrop(pointer: CGPoint(x: 20, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        _ = store.commitDrop(pShrink, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
+
+        // Window 1 closes -> Empty sibling must NOT be promoted; window 2 fills 100%.
+        XCTAssertEqual(store.handleWindowUnavailable(1), spaceA)
+        XCTAssertEqual(store.tree(for: spaceA).leafPlacements(in: boundsA).count, 1)
+        XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA), [2: boundsA])
+    }
 }
