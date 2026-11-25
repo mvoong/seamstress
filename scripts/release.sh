@@ -101,6 +101,43 @@ VERSION="${VERSION#v}"
 TAG="v$VERSION"
 RELEASE_DMG="$BUILD_ROOT/$APP_NAME-$VERSION.dmg"
 
+PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Resources/Info.plist")"
+PLIST_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ROOT/Resources/Info.plist")"
+MAX_PUBLISHED_BUILD=0
+
+if [ -f "$ROOT/site/appcast.xml" ]; then
+    APPCAST_MAX="$(/usr/bin/python3 - "$ROOT/site/appcast.xml" <<'PY'
+import re, sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    nums = [int(m) for m in re.findall(r"<sparkle:version>\s*(\d+)\s*</sparkle:version>", f.read())]
+print(max(nums) if nums else 0)
+PY
+)"
+    if [ "$APPCAST_MAX" -gt "$MAX_PUBLISHED_BUILD" ]; then
+        MAX_PUBLISHED_BUILD="$APPCAST_MAX"
+    fi
+fi
+
+LAST_TAG="$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null || true)"
+if [ -n "$LAST_TAG" ] && [ "$LAST_TAG" != "$TAG" ]; then
+    LAST_TAG_PLIST="$(git -C "$ROOT" show "$LAST_TAG:Resources/Info.plist" 2>/dev/null || true)"
+    if [ -n "$LAST_TAG_PLIST" ]; then
+        LAST_TAG_BUILD="$(printf '%s' "$LAST_TAG_PLIST" | /usr/bin/plutil -extract CFBundleVersion raw - 2>/dev/null || echo 0)"
+        if [[ "$LAST_TAG_BUILD" =~ ^[0-9]+$ ]] && [ "$LAST_TAG_BUILD" -gt "$MAX_PUBLISHED_BUILD" ]; then
+            MAX_PUBLISHED_BUILD="$LAST_TAG_BUILD"
+        fi
+    fi
+fi
+
+BUILD_NUMBER="$PLIST_BUILD"
+if [ "$VERSION" != "$PLIST_VERSION" ] || [ "$BUILD_NUMBER" -le "$MAX_PUBLISHED_BUILD" ]; then
+    BASE_BUILD="$PLIST_BUILD"
+    if [ "$MAX_PUBLISHED_BUILD" -gt "$BASE_BUILD" ]; then
+        BASE_BUILD="$MAX_PUBLISHED_BUILD"
+    fi
+    BUILD_NUMBER=$((BASE_BUILD + 1))
+fi
+
 if [ "$NO_UPLOAD" = false ]; then
     if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
         echo "Error: Working tree has uncommitted changes. Commit or pass --no-upload." >&2
@@ -157,7 +194,7 @@ rm -rf "$ICONSET" "$BUILD_ROOT/AppIcon.icns"
 swift "$ROOT/Resources/generate-icon.swift" "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$BUILD_ROOT/AppIcon.icns"
 
-echo "[3/7] Assembling $APP_NAME.app ($BUNDLE_ID, $VERSION)..."
+echo "[3/7] Assembling $APP_NAME.app ($BUNDLE_ID, $VERSION build $BUILD_NUMBER)..."
 SPARKLE_ARTIFACTS="$BUILD_ROOT/spm/artifacts/sparkle/Sparkle"
 SPARKLE_FW="$SPARKLE_ARTIFACTS/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 SPARKLE_SIGN_UPDATE="$SPARKLE_ARTIFACTS/bin/sign_update"
@@ -169,7 +206,7 @@ cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
-BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_BUNDLE/Contents/Info.plist")"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"
 cp "$BUILD_ROOT/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 ditto "$SPARKLE_FW" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
 
@@ -243,16 +280,24 @@ if [ "$NO_UPLOAD" = true ]; then
     exit 0
 fi
 
-echo "[7/7] Syncing site version & appcast, tagging $TAG, and uploading GitHub release to $GH_REPO..."
+echo "[7/7] Syncing Info.plist, site version & appcast, tagging $TAG (build $BUILD_NUMBER), and uploading GitHub release to $GH_REPO..."
+SOURCE_PLIST="$ROOT/Resources/Info.plist"
 SITE_INDEX="$ROOT/site/index.html"
 SITE_APPCAST="$ROOT/site/appcast.xml"
-SITE_UPDATED=false
+RELEASE_FILES_UPDATED=false
+
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$SOURCE_PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$SOURCE_PLIST"
+if ! git -C "$ROOT" diff --quiet -- "$SOURCE_PLIST"; then
+    git -C "$ROOT" add "$SOURCE_PLIST"
+    RELEASE_FILES_UPDATED=true
+fi
 
 if [ -f "$SITE_INDEX" ]; then
     VERSION_TAG="$TAG" /usr/bin/perl -0777 -i -pe 's/(<span\b[^>]*\bdata-version\b[^>]*>)v?[0-9]+\.[0-9]+\.[0-9]+([^<]*<\/span>)/$1.$ENV{VERSION_TAG}.$2/ge' "$SITE_INDEX"
     if ! git -C "$ROOT" diff --quiet -- "$SITE_INDEX"; then
         git -C "$ROOT" add "$SITE_INDEX"
-        SITE_UPDATED=true
+        RELEASE_FILES_UPDATED=true
     fi
 fi
 
@@ -306,13 +351,13 @@ with open(path, "w", encoding="utf-8") as f:
 PY
         if ! git -C "$ROOT" diff --quiet -- "$SITE_APPCAST"; then
             git -C "$ROOT" add "$SITE_APPCAST"
-            SITE_UPDATED=true
+            RELEASE_FILES_UPDATED=true
         fi
     fi
 fi
 
-if [ "$SITE_UPDATED" = true ]; then
-    git -C "$ROOT" commit -m "Update site version and appcast for $TAG"
+if [ "$RELEASE_FILES_UPDATED" = true ]; then
+    git -C "$ROOT" commit -m "Prepare release $TAG (build $BUILD_NUMBER)"
 fi
 
 if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
