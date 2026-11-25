@@ -250,7 +250,7 @@ struct MenuBarPopoverView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.1"
     }
 
     private func row(_ key: String, _ desc: String) -> some View {
