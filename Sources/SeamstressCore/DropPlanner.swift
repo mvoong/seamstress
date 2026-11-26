@@ -15,17 +15,17 @@ public struct DropPlan: Equatable, Sendable {
     public enum Action: Equatable, Sendable {
         /// Fill an existing empty slot 100%.
         case fillEmpty(leafID: NodeID)
-        /// Take half of an empty slot along `edge`, leaving the other half empty.
+        /// Take 1/2 (or 1/3 near the edge) of an empty slot along `edge`, leaving the remainder empty.
         case splitEmpty(leafID: NodeID, edge: SplitEdge)
-        /// Split an occupied slot 50/50 along `edge`.
+        /// Split an occupied slot along `edge` (50/50, or 1/3 for the incoming window near the edge).
         case splitOccupied(leafID: NodeID, edge: SplitEdge)
-        /// Split an entire `.split` container 50/50 along `edge` (triggered near its T-junction).
+        /// Split an entire `.split` container along `edge` (triggered near its T-junction; 50/50, or 1/3 near the edge).
         case splitNode(nodeID: NodeID, edge: SplitEdge)
         /// Swap with an occupied slot (or replace if dragged window is floating).
         case swapOrReplace(leafID: NodeID, targetWindowID: WindowID)
         /// Dragged tiled window dropped back onto the center of its own slot.
         case keepInPlace(leafID: NodeID)
-        /// Dragged tiled window dropped onto an edge of its own slot -> shrink to that half.
+        /// Dragged tiled window dropped onto an edge of its own slot -> shrink to that 1/2 (or 1/3 near the edge).
         case shrinkOwnSlot(leafID: NodeID, edge: SplitEdge)
     }
 
@@ -52,18 +52,25 @@ public struct DropPlan: Equatable, Sendable {
 
 /// Pure hit-testing planner for Option-drag drops.
 public enum DropPlanner {
-    /// Edge band fraction for empty slots (18% from each edge snaps to a half; center 64% fills 100%).
-    public static let emptyEdgeFraction: CGFloat = 0.18
+    /// Edge band fraction for empty slots (22% from each edge snaps to a split; center 56% fills 100%).
+    public static let emptyEdgeFraction: CGFloat = 0.22
     /// Maximum pixel width/height for empty-slot edge bands on ultrawide displays so edge targeting feels natural.
-    public static let maxEmptyEdgePixels: CGFloat = 220
+    public static let maxEmptyEdgePixels: CGFloat = 240
 
-    /// Center box fraction for occupied slots (inner 36% swaps; outer bands split 50/50).
+    /// Outer edge band fraction that snaps to 1/3 instead of 1/2 when dragging even closer to an edge.
+    public static let thirdEdgeFraction: CGFloat = 0.06
+    /// Maximum pixel width/height for the 1/3 edge band.
+    public static let maxThirdEdgePixels: CGFloat = 56
+
+    /// Center box fraction for occupied slots (inner 36% swaps; outer bands split 1/2, or 1/3 near the edge).
     public static let occupiedCenterFraction: CGFloat = 0.36
 
     /// Half-width along the seam perpendicular to the T edge (±52pt around the seam line).
     public static let tJunctionHalfSpan: CGFloat = 52
     /// Depth inward from the split container's outer edge for T-junction targeting.
-    public static let tJunctionMaxDepth: CGFloat = 68
+    public static let tJunctionMaxDepth: CGFloat = 84
+    /// Outer depth from the split container's edge within a T-junction that snaps to 1/3 instead of 1/2.
+    public static let tJunctionThirdMaxDepth: CGFloat = 32
 
     public static func plan(
         pointer: CGPoint,
@@ -142,10 +149,12 @@ public enum DropPlanner {
                 let parentLength = effectiveCellForCollapse.span(along: edge.axis)
                 let firstMin = edge.isFirstChild ? winMin : emptyMin
                 let secondMin = edge.isFirstChild ? emptyMin : winMin
+                let preferredRatio = preferredSplitRatio(for: edge, pointer: pointer, in: cell)
                 if let ratio = feasibleSplitRatio(
                     parentLength: parentLength,
                     firstMinPx: firstMin,
-                    secondMinPx: secondMin
+                    secondMinPx: secondMin,
+                    preferredRatio: preferredRatio
                 ) {
                     let fallbackPreview = splitRect(of: effectiveCellForCollapse, edge: edge, ratio: ratio)
                     let preview = simulatedPreviewRect(
@@ -184,10 +193,12 @@ public enum DropPlanner {
                 let parentLength = cell.span(along: edge.axis)
                 let firstMin = edge.isFirstChild ? winMin : emptyMin
                 let secondMin = edge.isFirstChild ? emptyMin : winMin
+                let preferredRatio = preferredSplitRatio(for: edge, pointer: pointer, in: cell)
                 if let ratio = feasibleSplitRatio(
                     parentLength: parentLength,
                     firstMinPx: firstMin,
-                    secondMinPx: secondMin
+                    secondMinPx: secondMin,
+                    preferredRatio: preferredRatio
                 ) {
                     let preview = splitRect(of: cell, edge: edge, ratio: ratio)
                     return DropPlan(
@@ -241,10 +252,12 @@ public enum DropPlanner {
             let effectiveLength = effectiveCell.span(along: edge.axis)
             let firstMin = edge.isFirstChild ? draggedMin : occupantMin
             let secondMin = edge.isFirstChild ? occupantMin : draggedMin
+            let preferredRatio = preferredSplitRatio(for: edge, pointer: pointer, in: cell)
             return feasibleSplitRatio(
                 parentLength: effectiveLength,
                 firstMinPx: firstMin,
-                secondMinPx: secondMin
+                secondMinPx: secondMin,
+                preferredRatio: preferredRatio
             )
         }
 
@@ -305,19 +318,42 @@ public enum DropPlanner {
         )
     }
 
-    /// Computes a clamped initial split ratio (preferring 0.5) when both sides' minimum extents
-    /// can fit inside `parentLength`, or returns `nil` when the split is geometrically impossible.
+    /// Computes a clamped initial split ratio (preferring `preferredRatio`, default 0.5) when both sides'
+    /// minimum extents can fit inside `parentLength`, or returns `nil` when the split is geometrically impossible.
     private static func feasibleSplitRatio(
         parentLength: CGFloat,
         firstMinPx: CGFloat,
-        secondMinPx: CGFloat
+        secondMinPx: CGFloat,
+        preferredRatio: CGFloat = 0.5
     ) -> CGFloat? {
         guard parentLength > 1 else { return nil }
         guard firstMinPx + secondMinPx <= parentLength + 0.5 else { return nil }
         let minRatio = max(0.05, firstMinPx / parentLength)
         let maxRatio = min(0.95, 1.0 - (secondMinPx / parentLength))
         guard minRatio <= maxRatio else { return nil }
-        return min(max(0.5, minRatio), maxRatio)
+        return min(max(preferredRatio, minRatio), maxRatio)
+    }
+
+    private static func distanceFromEdge(_ edge: SplitEdge, point: CGPoint, in rect: CGRect) -> CGFloat {
+        switch edge {
+        case .left:   return point.x - rect.minX
+        case .right:  return rect.maxX - point.x
+        case .top:    return point.y - rect.minY
+        case .bottom: return rect.maxY - point.y
+        }
+    }
+
+    private static func preferredSplitRatio(
+        for edge: SplitEdge,
+        pointer: CGPoint,
+        in cell: CGRect
+    ) -> CGFloat {
+        let span = cell.span(along: edge.axis)
+        let thirdBand = min(span * thirdEdgeFraction, maxThirdEdgePixels)
+        guard thirdBand > 0, distanceFromEdge(edge, point: pointer, in: cell) <= thirdBand else {
+            return 0.5
+        }
+        return edge.isFirstChild ? (1.0 / 3.0) : (2.0 / 3.0)
     }
 
     private static func tJunctionSplitRatio(
@@ -374,7 +410,13 @@ public enum DropPlanner {
         let length = effectiveBounds.span(along: tHit.edge.axis)
         let firstMin = tHit.edge.isFirstChild ? draggedMin : containerMin
         let secondMin = tHit.edge.isFirstChild ? containerMin : draggedMin
-        return feasibleSplitRatio(parentLength: length, firstMinPx: firstMin, secondMinPx: secondMin)
+        let preferredRatio: CGFloat = tHit.isThird ? (tHit.edge.isFirstChild ? (1.0 / 3.0) : (2.0 / 3.0)) : 0.5
+        return feasibleSplitRatio(
+            parentLength: length,
+            firstMinPx: firstMin,
+            secondMinPx: secondMin,
+            preferredRatio: preferredRatio
+        )
     }
 
     private static func nodeBounds(of targetID: NodeID, in node: LayoutTree.Node, bounds: CGRect) -> CGRect? {
@@ -456,6 +498,7 @@ public enum DropPlanner {
         let containerBounds: CGRect
         let distance: CGFloat
         let depth: Int
+        let isThird: Bool
     }
 
     private static func tJunctionHit(
@@ -483,36 +526,40 @@ public enum DropPlanner {
         // Only offer T-junction container splitting when both sides of the split are occupied
         // (or at least non-trivial); if one side is empty, normal empty-slot targeting is clearer.
         if !first.isCompletelyEmpty && !second.isCompletelyEmpty {
-            let zones: [(edge: SplitEdge, rect: CGRect, anchor: CGPoint)]
+            let zones: [(edge: SplitEdge, rect: CGRect, anchor: CGPoint, thirdDepth: CGFloat)]
             switch axis {
             case .vertical:
                 let halfSpan = min(tJunctionHalfSpan, min(firstRect.width, secondRect.width) * 0.45)
-                let depthPx = min(tJunctionMaxDepth, bounds.height * 0.14)
+                let depthPx = min(tJunctionMaxDepth, bounds.height * 0.18)
+                let thirdDepthPx = min(tJunctionThirdMaxDepth, depthPx * 0.4)
                 let topRect = CGRect(x: seamPos - halfSpan, y: bounds.minY, width: halfSpan * 2, height: depthPx)
                 let bottomRect = CGRect(x: seamPos - halfSpan, y: bounds.maxY - depthPx, width: halfSpan * 2, height: depthPx)
                 zones = [
-                    (.top, topRect, CGPoint(x: seamPos, y: bounds.minY)),
-                    (.bottom, bottomRect, CGPoint(x: seamPos, y: bounds.maxY)),
+                    (.top, topRect, CGPoint(x: seamPos, y: bounds.minY), thirdDepthPx),
+                    (.bottom, bottomRect, CGPoint(x: seamPos, y: bounds.maxY), thirdDepthPx),
                 ]
             case .horizontal:
                 let halfSpan = min(tJunctionHalfSpan, min(firstRect.height, secondRect.height) * 0.45)
-                let depthPx = min(tJunctionMaxDepth, bounds.width * 0.14)
+                let depthPx = min(tJunctionMaxDepth, bounds.width * 0.18)
+                let thirdDepthPx = min(tJunctionThirdMaxDepth, depthPx * 0.4)
                 let leftRect = CGRect(x: bounds.minX, y: seamPos - halfSpan, width: depthPx, height: halfSpan * 2)
                 let rightRect = CGRect(x: bounds.maxX - depthPx, y: seamPos - halfSpan, width: depthPx, height: halfSpan * 2)
                 zones = [
-                    (.left, leftRect, CGPoint(x: bounds.minX, y: seamPos)),
-                    (.right, rightRect, CGPoint(x: bounds.maxX, y: seamPos)),
+                    (.left, leftRect, CGPoint(x: bounds.minX, y: seamPos), thirdDepthPx),
+                    (.right, rightRect, CGPoint(x: bounds.maxX, y: seamPos), thirdDepthPx),
                 ]
             }
 
             for zone in zones where zone.rect.contains(pointer) {
                 let dist = hypot(pointer.x - zone.anchor.x, pointer.y - zone.anchor.y)
+                let edgeDist = distanceFromEdge(zone.edge, point: pointer, in: bounds)
                 let candidate = TJunctionCandidate(
                     nodeID: id,
                     edge: zone.edge,
                     containerBounds: bounds,
                     distance: dist,
-                    depth: depth
+                    depth: depth,
+                    isThird: zone.thirdDepth > 0 && edgeDist <= zone.thirdDepth
                 )
                 if let current = best {
                     if dist < current.distance - 1 || (abs(dist - current.distance) <= 1 && depth > current.depth) {

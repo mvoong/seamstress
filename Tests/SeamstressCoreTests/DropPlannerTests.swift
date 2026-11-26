@@ -20,27 +20,72 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(plan?.previewKind, .fill)
     }
 
-    func testEmptyScreenEdgeSnapsToHalf() {
+    func testEmptyScreenEdgeSnapsToHalfAndCloserToThird() {
         let tree = LayoutTree()
-        let leftPlan = DropPlanner.plan(
-            pointer: CGPoint(x: 40, y: 400),
-            draggedWindowID: 10,
-            targetSpace: space,
-            tree: tree,
-            screenBounds: screen
-        )
-        XCTAssertEqual(leftPlan?.action, .splitEmpty(leafID: tree.root.id, edge: .left))
-        XCTAssertEqual(leftPlan?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
 
-        let bottomPlan = DropPlanner.plan(
-            pointer: CGPoint(x: 500, y: 760),
+        // Inner edge band snaps to 1/2
+        let leftHalf = DropPlanner.plan(
+            pointer: CGPoint(x: 100, y: 400),
             draggedWindowID: 10,
             targetSpace: space,
             tree: tree,
             screenBounds: screen
         )
-        XCTAssertEqual(bottomPlan?.action, .splitEmpty(leafID: tree.root.id, edge: .bottom))
-        XCTAssertEqual(bottomPlan?.previewRect, CGRect(x: 0, y: 400, width: 1000, height: 400))
+        XCTAssertEqual(leftHalf?.action, .splitEmpty(leafID: tree.root.id, edge: .left))
+        XCTAssertEqual(leftHalf?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
+
+        let bottomHalf = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 700),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(bottomHalf?.action, .splitEmpty(leafID: tree.root.id, edge: .bottom))
+        XCTAssertEqual(bottomHalf?.previewRect, CGRect(x: 0, y: 400, width: 1000, height: 400))
+
+        // Closer to the edge snaps to 1/3
+        let leftThird = DropPlanner.plan(
+            pointer: CGPoint(x: 30, y: 400),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(leftThird?.action, .splitEmpty(leafID: tree.root.id, edge: .left))
+        XCTAssertEqual(leftThird?.previewRect, CGRect(x: 0, y: 0, width: 333, height: 800))
+        XCTAssertEqual(leftThird?.splitRatio ?? 0, 1.0 / 3.0, accuracy: 0.001)
+
+        let rightThird = DropPlanner.plan(
+            pointer: CGPoint(x: 970, y: 400),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(rightThird?.action, .splitEmpty(leafID: tree.root.id, edge: .right))
+        XCTAssertEqual(rightThird?.previewRect, CGRect(x: 667, y: 0, width: 333, height: 800))
+        XCTAssertEqual(rightThird?.splitRatio ?? 0, 2.0 / 3.0, accuracy: 0.001)
+
+        let topThird = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 20),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(topThird?.action, .splitEmpty(leafID: tree.root.id, edge: .top))
+        XCTAssertEqual(topThird?.previewRect, CGRect(x: 0, y: 0, width: 1000, height: 267))
+
+        let bottomThird = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 780),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(bottomThird?.action, .splitEmpty(leafID: tree.root.id, edge: .bottom))
+        XCTAssertEqual(bottomThird?.previewRect, CGRect(x: 0, y: 533, width: 1000, height: 267))
     }
 
     func testOccupiedSlotCenterSwapsOuterSplits() {
@@ -73,7 +118,7 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(swapPlan?.previewKind, .swap)
         XCTAssertEqual(swapPlan?.previewRect, screen)
 
-        // Right outer splits vertically on right
+        // Right outer splits vertically on right (50/50 in mid-edge, 1/3 closer to edge)
         let splitPlan = DropPlanner.plan(
             pointer: CGPoint(x: 880, y: 400),
             draggedWindowID: 20,
@@ -84,22 +129,44 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(splitPlan?.action, .splitOccupied(leafID: leafID, edge: .right))
         XCTAssertEqual(splitPlan?.previewKind, .split)
         XCTAssertEqual(splitPlan?.previewRect, CGRect(x: 500, y: 0, width: 500, height: 800))
+
+        let thirdSplitPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 970, y: 400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(thirdSplitPlan?.action, .splitOccupied(leafID: leafID, edge: .right))
+        XCTAssertEqual(thirdSplitPlan?.previewKind, .split)
+        XCTAssertEqual(thirdSplitPlan?.previewRect, CGRect(x: 667, y: 0, width: 333, height: 800))
+        XCTAssertEqual(thirdSplitPlan?.splitRatio ?? 0, 2.0 / 3.0, accuracy: 0.001)
     }
 
-    func testDraggingOwnSlotToEdgeShrinksToHalf() {
+    func testDraggingOwnSlotToEdgeShrinksToHalfOrThird() {
         var tree = LayoutTree()
         tree.fillEmpty(leafID: tree.root.id, with: 10)
         let leafID = tree.leafID(for: 10)!
 
-        let edgePlan = DropPlanner.plan(
+        let halfPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 100, y: 400),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(halfPlan?.action, .shrinkOwnSlot(leafID: leafID, edge: .left))
+        XCTAssertEqual(halfPlan?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
+
+        let thirdPlan = DropPlanner.plan(
             pointer: CGPoint(x: 30, y: 400),
             draggedWindowID: 10,
             targetSpace: space,
             tree: tree,
             screenBounds: screen
         )
-        XCTAssertEqual(edgePlan?.action, .shrinkOwnSlot(leafID: leafID, edge: .left))
-        XCTAssertEqual(edgePlan?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
+        XCTAssertEqual(thirdPlan?.action, .shrinkOwnSlot(leafID: leafID, edge: .left))
+        XCTAssertEqual(thirdPlan?.previewRect, CGRect(x: 0, y: 0, width: 333, height: 800))
 
         let centerPlan = DropPlanner.plan(
             pointer: CGPoint(x: 500, y: 400),
@@ -117,9 +184,9 @@ final class DropPlannerTests: XCTestCase {
         tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .right, with: 20)
         let rootSplitID = tree.root.id
 
-        // Dragging near top-center "T" (500, 15) spans full width across both panes
+        // Dragging near top-center "T" (500, 50) spans full width across both panes at 50%
         let topT = DropPlanner.plan(
-            pointer: CGPoint(x: 500, y: 15),
+            pointer: CGPoint(x: 500, y: 50),
             draggedWindowID: 30,
             targetSpace: space,
             tree: tree,
@@ -129,9 +196,21 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(topT?.previewKind, .splitContainer)
         XCTAssertEqual(topT?.previewRect, CGRect(x: 0, y: 0, width: 1000, height: 400))
 
-        // Dragging near bottom-center "T" (500, 785) spans full width on bottom half
+        // Dragging even closer to the top-center "T" (500, 15) snaps to 1/3 height
+        let topThirdT = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 15),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(topThirdT?.action, .splitNode(nodeID: rootSplitID, edge: .top))
+        XCTAssertEqual(topThirdT?.previewKind, .splitContainer)
+        XCTAssertEqual(topThirdT?.previewRect, CGRect(x: 0, y: 0, width: 1000, height: 267))
+
+        // Dragging near bottom-center "T" (500, 750) spans full width on bottom half; (500, 785) snaps to 1/3
         let bottomT = DropPlanner.plan(
-            pointer: CGPoint(x: 500, y: 785),
+            pointer: CGPoint(x: 500, y: 750),
             draggedWindowID: 30,
             targetSpace: space,
             tree: tree,
@@ -141,9 +220,20 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(bottomT?.previewKind, .splitContainer)
         XCTAssertEqual(bottomT?.previewRect, CGRect(x: 0, y: 400, width: 1000, height: 400))
 
-        // Dragging near top-left (150, 15) away from the T still splits only window 10
+        let bottomThirdT = DropPlanner.plan(
+            pointer: CGPoint(x: 500, y: 785),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(bottomThirdT?.action, .splitNode(nodeID: rootSplitID, edge: .bottom))
+        XCTAssertEqual(bottomThirdT?.previewKind, .splitContainer)
+        XCTAssertEqual(bottomThirdT?.previewRect, CGRect(x: 0, y: 533, width: 1000, height: 267))
+
+        // Dragging near top-left (150, 70) away from the T still splits only window 10
         let leftOnly = DropPlanner.plan(
-            pointer: CGPoint(x: 150, y: 15),
+            pointer: CGPoint(x: 150, y: 70),
             draggedWindowID: 30,
             targetSpace: space,
             tree: tree,
@@ -159,9 +249,9 @@ final class DropPlannerTests: XCTestCase {
         tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .bottom, with: 20)
         let rootSplitID = tree.root.id
 
-        // Dragging near left-middle "T" (20, 400) spans full height on left half
+        // Dragging near left-middle "T" (50, 400) spans full height on left half; (20, 400) snaps to 1/3
         let leftT = DropPlanner.plan(
-            pointer: CGPoint(x: 20, y: 400),
+            pointer: CGPoint(x: 50, y: 400),
             draggedWindowID: 30,
             targetSpace: space,
             tree: tree,
@@ -171,9 +261,20 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(leftT?.previewKind, .splitContainer)
         XCTAssertEqual(leftT?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
 
-        // Dragging near right-middle "T" (980, 400) spans full height on right half
+        let leftThirdT = DropPlanner.plan(
+            pointer: CGPoint(x: 20, y: 400),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(leftThirdT?.action, .splitNode(nodeID: rootSplitID, edge: .left))
+        XCTAssertEqual(leftThirdT?.previewKind, .splitContainer)
+        XCTAssertEqual(leftThirdT?.previewRect, CGRect(x: 0, y: 0, width: 333, height: 800))
+
+        // Dragging near right-middle "T" (950, 400) spans full height on right half; (980, 400) snaps to 1/3
         let rightT = DropPlanner.plan(
-            pointer: CGPoint(x: 980, y: 400),
+            pointer: CGPoint(x: 950, y: 400),
             draggedWindowID: 30,
             targetSpace: space,
             tree: tree,
@@ -182,6 +283,17 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(rightT?.action, .splitNode(nodeID: rootSplitID, edge: .right))
         XCTAssertEqual(rightT?.previewKind, .splitContainer)
         XCTAssertEqual(rightT?.previewRect, CGRect(x: 500, y: 0, width: 500, height: 800))
+
+        let rightThirdT = DropPlanner.plan(
+            pointer: CGPoint(x: 980, y: 400),
+            draggedWindowID: 30,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(rightThirdT?.action, .splitNode(nodeID: rootSplitID, edge: .right))
+        XCTAssertEqual(rightThirdT?.previewKind, .splitContainer)
+        XCTAssertEqual(rightThirdT?.previewRect, CGRect(x: 667, y: 0, width: 333, height: 800))
     }
 
     func testSameSpaceResplitProducesWYSIWYGPreviewRect() {
@@ -191,9 +303,9 @@ final class DropPlannerTests: XCTestCase {
         let leafB = tree.leafID(for: 20)!
 
         // Dragging left pane 10 onto top edge of right pane 20 collapses 10's old slot,
-        // so 10 lands in the full-width top half rather than just the top-right quarter.
+        // so 10 lands in the full-width top half (or top third closer to edge).
         let plan = DropPlanner.plan(
-            pointer: CGPoint(x: 750, y: 30),
+            pointer: CGPoint(x: 750, y: 100),
             draggedWindowID: 10,
             targetSpace: space,
             tree: tree,
@@ -202,6 +314,17 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(plan?.action, .splitOccupied(leafID: leafB, edge: .top))
         XCTAssertEqual(plan?.previewKind, .split)
         XCTAssertEqual(plan?.previewRect, CGRect(x: 0, y: 0, width: 1000, height: 400))
+
+        let thirdPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 750, y: 20),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(thirdPlan?.action, .splitOccupied(leafID: leafB, edge: .top))
+        XCTAssertEqual(thirdPlan?.previewKind, .split)
+        XCTAssertEqual(thirdPlan?.previewRect, CGRect(x: 0, y: 0, width: 1000, height: 267))
 
         // Same-space swap on center of right pane 20 defaults to .swap because 10 is in tree
         let swapPlan = DropPlanner.plan(
@@ -222,10 +345,10 @@ final class DropPlannerTests: XCTestCase {
         tree.splitOccupied(leafID: tree.leafID(for: 10)!, edge: .right, with: 20)
         tree.splitOccupied(leafID: tree.leafID(for: 20)!, edge: .bottom, with: 30)
 
-        // Dragging left pane 10 onto the left T-junction of [20 / 30] (x=520, y=400)
+        // Dragging left pane 10 onto the left T-junction of [20 / 30] (x=550, y=400)
         // collapses 10's old slot so the right subtree expands to full screen before splitting left.
         let plan = DropPlanner.plan(
-            pointer: CGPoint(x: 520, y: 400),
+            pointer: CGPoint(x: 550, y: 400),
             draggedWindowID: 10,
             targetSpace: space,
             tree: tree,
@@ -233,6 +356,17 @@ final class DropPlannerTests: XCTestCase {
         )
         XCTAssertEqual(plan?.previewKind, .splitContainer)
         XCTAssertEqual(plan?.previewRect, CGRect(x: 0, y: 0, width: 500, height: 800))
+
+        // Closer to the T-junction edge (x=520, y=400) snaps to 1/3 of the expanded screen.
+        let thirdPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 520, y: 400),
+            draggedWindowID: 10,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(thirdPlan?.previewKind, .splitContainer)
+        XCTAssertEqual(thirdPlan?.previewRect, CGRect(x: 0, y: 0, width: 333, height: 800))
     }
 
     func testMinSizePreventsImpossibleQuarterShrinkAndClampsHalfSplitRatio() {
@@ -318,7 +452,7 @@ final class DropPlannerTests: XCTestCase {
         ]
 
         let plan = DropPlanner.plan(
-            pointer: CGPoint(x: 980, y: 400),
+            pointer: CGPoint(x: 950, y: 400),
             draggedWindowID: 20,
             targetSpace: space,
             tree: tree,
@@ -327,6 +461,18 @@ final class DropPlannerTests: XCTestCase {
         )
         XCTAssertEqual(plan?.previewKind, .splitContainer)
         XCTAssertEqual(plan?.previewRect, CGRect(x: 750, y: 0, width: 250, height: 800))
+
+        // Even closer to the right edge (x=980) targets 1/3 (~167px) and clamps to window 20's 200px minWidth.
+        let clampedThirdPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 980, y: 400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen,
+            minSizes: minSizes
+        )
+        XCTAssertEqual(clampedThirdPlan?.previewKind, .splitContainer)
+        XCTAssertEqual(clampedThirdPlan?.previewRect, CGRect(x: 800, y: 0, width: 200, height: 800))
     }
 
     func testInfeasibleVerticalAxisAllocatesFullWidthTopAndBottomZones() {
@@ -486,9 +632,9 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(fillPlan?.previewRect, CGRect(x: 500, y: 0, width: 500, height: 800))
 
         // Dragging 20 to left edge of Empty collapses 20's old right half and splits the expanded
-        // 500..1000 region, placing 20 in 500..750.
+        // 500..1000 region, placing 20 in 500..750 (1/2) or 500..667 (1/3 closer to edge).
         let splitPlan = DropPlanner.plan(
-            pointer: CGPoint(x: 260, y: 400),
+            pointer: CGPoint(x: 280, y: 400),
             draggedWindowID: 20,
             targetSpace: space,
             tree: tree,
@@ -497,5 +643,16 @@ final class DropPlannerTests: XCTestCase {
         XCTAssertEqual(splitPlan?.action, .splitEmpty(leafID: emptyLeafID, edge: .left))
         XCTAssertEqual(splitPlan?.previewKind, .split)
         XCTAssertEqual(splitPlan?.previewRect, CGRect(x: 500, y: 0, width: 250, height: 800))
+
+        let thirdSplitPlan = DropPlanner.plan(
+            pointer: CGPoint(x: 260, y: 400),
+            draggedWindowID: 20,
+            targetSpace: space,
+            tree: tree,
+            screenBounds: screen
+        )
+        XCTAssertEqual(thirdSplitPlan?.action, .splitEmpty(leafID: emptyLeafID, edge: .left))
+        XCTAssertEqual(thirdSplitPlan?.previewKind, .split)
+        XCTAssertEqual(thirdSplitPlan?.previewRect, CGRect(x: 500, y: 0, width: 167, height: 800))
     }
 }

@@ -329,11 +329,12 @@ final class WindowDragController {
         snapModifierDown: Bool
     ) {
         if snapModifierDown {
-            let previousAction = current.currentPlan?.action
+            let previousPlan = current.currentPlan
             let plan = computeDropPlan(at: point, draggedWindowID: current.window.windowID)
             current.currentPlan = plan
             if let plan {
-                if plan.action != previousAction {
+                let ratioChanged = previousPlan.map { abs($0.splitRatio - plan.splitRatio) > 0.01 } ?? true
+                if plan.action != previousPlan?.action || ratioChanged {
                     NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
                 }
                 dropOverlay.show(

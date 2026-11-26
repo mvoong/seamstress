@@ -15,7 +15,7 @@ final class SpaceLayoutStoreTests: XCTestCase {
     func testSameSpaceMoveToEmptySlotDoesNotLoseWindow() {
         let store = SpaceLayoutStore()
         // Place window 1 on left half (right half is empty)
-        let plan1 = store.planDrop(pointer: CGPoint(x: 30, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        let plan1 = store.planDrop(pointer: CGPoint(x: 100, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
         _ = store.commitDrop(plan1, draggedWindowID: 1, preDragFrame: CGRect(x: 100, y: 100, width: 600, height: 500), boundsForSpace: bounds)
         XCTAssertEqual(store.frames(for: spaceA, screenBounds: boundsA)[1], CGRect(x: 0, y: 0, width: 500, height: 800))
 
@@ -85,8 +85,8 @@ final class SpaceLayoutStoreTests: XCTestCase {
         let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
         _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
 
-        // Drag window 1 to the top T-junction (500, 10) of [1 | 2] -> becomes [1 / 2]
-        let tPlan = store.planDrop(pointer: CGPoint(x: 500, y: 10), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        // Drag window 1 to the top T-junction (500, 50) of [1 | 2] -> becomes [1 / 2] 50/50
+        let tPlan = store.planDrop(pointer: CGPoint(x: 500, y: 50), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
         let commit = store.commitDrop(tPlan, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
 
         XCTAssertEqual(commit.framesToApply[1], CGRect(x: 0, y: 0, width: 1000, height: 400))
@@ -297,7 +297,7 @@ final class SpaceLayoutStoreTests: XCTestCase {
         _ = store.commitDrop(p1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
         let p2 = store.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
         _ = store.commitDrop(p2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
-        let pShrink = store.planDrop(pointer: CGPoint(x: 20, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
+        let pShrink = store.planDrop(pointer: CGPoint(x: 60, y: 400), draggedWindowID: 1, targetSpace: spaceA, screenBounds: boundsA)!
         _ = store.commitDrop(pShrink, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
 
         // Option-drag window 2 into the middle empty slot (250..500)
@@ -336,7 +336,7 @@ final class SpaceLayoutStoreTests: XCTestCase {
         _ = store2.commitDrop(q1, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
         let q2 = store2.planDrop(pointer: CGPoint(x: 900, y: 400), draggedWindowID: 2, targetSpace: spaceA, screenBounds: boundsA)!
         _ = store2.commitDrop(q2, draggedWindowID: 2, preDragFrame: .zero, boundsForSpace: bounds)
-        let edgeMoveToB = store2.planDrop(pointer: CGPoint(x: 1030, y: 400), draggedWindowID: 1, targetSpace: spaceB, screenBounds: boundsB)!
+        let edgeMoveToB = store2.planDrop(pointer: CGPoint(x: 1100, y: 400), draggedWindowID: 1, targetSpace: spaceB, screenBounds: boundsB)!
         let edgeCommit = store2.commitDrop(edgeMoveToB, draggedWindowID: 1, preDragFrame: .zero, boundsForSpace: bounds)
         XCTAssertEqual(store2.tree(for: spaceA).leafPlacements(in: boundsA).count, 1)
         XCTAssertEqual(edgeCommit.framesToApply[2], boundsA)

@@ -13,11 +13,14 @@
   const VISUAL_THICKNESS = 2;
   const SNAP_TOLERANCE_PX = 7;
 
-  const EMPTY_EDGE_FRACTION = 0.18;
-  const MAX_EMPTY_EDGE_PX = 130;
+  const EMPTY_EDGE_FRACTION = 0.22;
+  const MAX_EMPTY_EDGE_PX = 150;
+  const THIRD_EDGE_FRACTION = 0.06;
+  const MAX_THIRD_EDGE_PX = 38;
   const OCCUPIED_CENTER_FRACTION = 0.36;
   const T_JUNCTION_HALF_SPAN = 44;
-  const T_JUNCTION_MAX_DEPTH = 54;
+  const T_JUNCTION_MAX_DEPTH = 64;
+  const T_JUNCTION_THIRD_MAX_DEPTH = 24;
 
   function clamp(v, lo, hi) {
     return Math.min(Math.max(v, lo), hi);
@@ -780,13 +783,29 @@
 
   // MARK: - DropPlanner
 
-  function feasibleSplitRatio(parentLength, firstMinPx, secondMinPx) {
+  function feasibleSplitRatio(parentLength, firstMinPx, secondMinPx, preferredRatio = 0.5) {
     if (parentLength <= 1) return null;
     if (firstMinPx + secondMinPx > parentLength + 0.5) return null;
     const minRatio = Math.max(0.05, firstMinPx / parentLength);
     const maxRatio = Math.min(0.95, 1 - secondMinPx / parentLength);
     if (minRatio > maxRatio) return null;
-    return clamp(0.5, minRatio, maxRatio);
+    return clamp(preferredRatio, minRatio, maxRatio);
+  }
+
+  function distanceFromEdge(edge, point, rect) {
+    if (edge === 'left') return point.x - rect.x;
+    if (edge === 'right') return rect.x + rect.width - point.x;
+    if (edge === 'top') return point.y - rect.y;
+    return rect.y + rect.height - point.y;
+  }
+
+  function preferredSplitRatio(edge, pointer, cell) {
+    const span = rectSpan(cell, edgeAxis(edge));
+    const thirdBand = Math.min(span * THIRD_EDGE_FRACTION, MAX_THIRD_EDGE_PX);
+    if (thirdBand > 0 && distanceFromEdge(edge, pointer, cell) <= thirdBand) {
+      return edgeIsFirstChild(edge) ? 1 / 3 : 2 / 3;
+    }
+    return 0.5;
   }
 
   function splitRectOf(cell, edge, ratio = 0.5) {
@@ -854,12 +873,14 @@
             T_JUNCTION_HALF_SPAN,
             Math.min(first.width, second.width) * 0.45
           );
-          const depthPx = Math.min(T_JUNCTION_MAX_DEPTH, b.height * 0.14);
+          const depthPx = Math.min(T_JUNCTION_MAX_DEPTH, b.height * 0.18);
+          const thirdDepth = Math.min(T_JUNCTION_THIRD_MAX_DEPTH, depthPx * 0.4);
           zones = [
             {
               edge: 'top',
               rect: { x: seamPosition - halfSpan, y: b.y, width: halfSpan * 2, height: depthPx },
               anchor: { x: seamPosition, y: b.y },
+              thirdDepth,
             },
             {
               edge: 'bottom',
@@ -870,6 +891,7 @@
                 height: depthPx,
               },
               anchor: { x: seamPosition, y: b.y + b.height },
+              thirdDepth,
             },
           ];
         } else {
@@ -877,12 +899,14 @@
             T_JUNCTION_HALF_SPAN,
             Math.min(first.height, second.height) * 0.45
           );
-          const depthPx = Math.min(T_JUNCTION_MAX_DEPTH, b.width * 0.14);
+          const depthPx = Math.min(T_JUNCTION_MAX_DEPTH, b.width * 0.18);
+          const thirdDepth = Math.min(T_JUNCTION_THIRD_MAX_DEPTH, depthPx * 0.4);
           zones = [
             {
               edge: 'left',
               rect: { x: b.x, y: seamPosition - halfSpan, width: depthPx, height: halfSpan * 2 },
               anchor: { x: b.x, y: seamPosition },
+              thirdDepth,
             },
             {
               edge: 'right',
@@ -893,6 +917,7 @@
                 height: halfSpan * 2,
               },
               anchor: { x: b.x + b.width, y: seamPosition },
+              thirdDepth,
             },
           ];
         }
@@ -900,12 +925,14 @@
         for (const z of zones) {
           if (!rectContains(z.rect, pointer)) continue;
           const dist = Math.hypot(pointer.x - z.anchor.x, pointer.y - z.anchor.y);
+          const edgeDist = distanceFromEdge(z.edge, pointer, b);
           const candidate = {
             nodeID: node.id,
             edge: z.edge,
             containerBounds: b,
             distance: dist,
             depth,
+            isThird: z.thirdDepth > 0 && edgeDist <= z.thirdDepth,
           };
           if (!best) {
             best = candidate;
@@ -966,7 +993,8 @@
     const length = rectSpan(effectiveBounds, axis);
     const firstMin = edgeIsFirstChild(tHit.edge) ? draggedMin : containerMin;
     const secondMin = edgeIsFirstChild(tHit.edge) ? containerMin : draggedMin;
-    return feasibleSplitRatio(length, firstMin, secondMin);
+    const preferred = tHit.isThird ? (edgeIsFirstChild(tHit.edge) ? 1 / 3 : 2 / 3) : 0.5;
+    return feasibleSplitRatio(length, firstMin, secondMin, preferred);
   }
 
   const DropPlanner = {
@@ -1027,7 +1055,8 @@
           const parentLength = rectSpan(effectiveCellForCollapse, axis);
           const firstMin = edgeIsFirstChild(edge) ? winMin : emptyMin;
           const secondMin = edgeIsFirstChild(edge) ? emptyMin : winMin;
-          const ratio = feasibleSplitRatio(parentLength, firstMin, secondMin);
+          const preferred = preferredSplitRatio(edge, pointer, cell);
+          const ratio = feasibleSplitRatio(parentLength, firstMin, secondMin, preferred);
           if (ratio !== null) {
             const fallbackPreview = splitRectOf(effectiveCellForCollapse, edge, ratio);
             const preview = simulatedPreviewRect(
@@ -1068,7 +1097,8 @@
           const parentLength = rectSpan(cell, axis);
           const firstMin = edgeIsFirstChild(edge) ? winMin : emptyMin;
           const secondMin = edgeIsFirstChild(edge) ? emptyMin : winMin;
-          const ratio = feasibleSplitRatio(parentLength, firstMin, secondMin);
+          const preferred = preferredSplitRatio(edge, pointer, cell);
+          const ratio = feasibleSplitRatio(parentLength, firstMin, secondMin, preferred);
           if (ratio !== null) {
             return {
               action: { type: 'shrinkOwnSlot', leafID: leaf.leafID, edge },
@@ -1123,7 +1153,8 @@
         const effectiveLength = rectSpan(effectiveCell, axis);
         const firstMin = edgeIsFirstChild(edge) ? draggedMin : occupantMin;
         const secondMin = edgeIsFirstChild(edge) ? occupantMin : draggedMin;
-        return feasibleSplitRatio(effectiveLength, firstMin, secondMin);
+        const preferred = preferredSplitRatio(edge, pointer, cell);
+        return feasibleSplitRatio(effectiveLength, firstMin, secondMin, preferred);
       };
 
       const canSplitV = ratioForOccupiedEdge('left') !== null;

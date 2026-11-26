@@ -31,7 +31,7 @@ final class LayoutHistoryTests: XCTestCase {
         )
 
         let plan2 = store.planDrop(
-            pointer: CGPoint(x: bounds.maxX - 40, y: bounds.midY),
+            pointer: CGPoint(x: bounds.maxX - 120, y: bounds.midY),
             draggedWindowID: right,
             targetSpace: s,
             screenBounds: bounds

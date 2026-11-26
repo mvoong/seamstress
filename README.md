@@ -18,11 +18,11 @@ Try the interactive layout playground at **[seamstress.voong.io](https://seamstr
 | Action | Behavior |
 | --- | --- |
 | **`⌥` or `⌃⌘` + Drag** into empty screen / empty slot (center) | Fills 100% of the available empty space. |
-| **`⌥` or `⌃⌘` + Drag** into empty screen / empty slot (near an edge) | Takes 50% on that edge (left, right, top, or bottom) and leaves the opposite half as an empty slot. |
-| **`⌥` or `⌃⌘` + Drag** onto an occupied tiled window (outer bands) | Splits that pane 50/50 along the targeted edge. |
-| **`⌥` or `⌃⌘` + Drag** near a split's **T-junction** (`┬`, `┴`, `├`, `┤`) | Splits the entire parent split container 50/50 along that perpendicular axis (spanning across both child panes). |
+| **`⌥` or `⌃⌘` + Drag** into empty screen / empty slot (near an edge) | Takes 50% on that edge (left, right, top, or bottom), or ⅓ when dragged even closer to the edge, leaving the remainder as an empty slot. |
+| **`⌥` or `⌃⌘` + Drag** onto an occupied tiled window (outer bands) | Splits that pane 50/50 along the targeted edge, or ⅓ for the incoming window when dragged even closer to the edge. |
+| **`⌥` or `⌃⌘` + Drag** near a split's **T-junction** (`┬`, `┴`, `├`, `┤`) | Splits the entire parent split container along that perpendicular axis (spanning across both child panes): 50/50, or ⅓ when dragged closer to the edge. |
 | **`⌥` or `⌃⌘` + Drag** onto an occupied tiled window (center ~36%) | Swaps two tiled windows, or replaces the tiled window with a floating window (restoring the displaced window to its pre-tiled size). |
-| **`⌥` or `⌃⌘` + Drag** a tiled window onto its own edge | Shrinks it to that half and leaves the opposite half empty. |
+| **`⌥` or `⌃⌘` + Drag** a tiled window onto its own edge | Shrinks it to 50% (or ⅓ closer to the edge) and leaves the remainder empty. |
 | **Release `⌥` / `⌃⌘` mid-drag** | Cancels tiling preview and lets the window drop as floating (detaching a tiled window). |
 | **Normal Drag** (without `⌥` or `⌃⌘`) on a tiled window | Detaches it back to floating, restores its pre-tiled size anchored under the cursor, and expands neighboring windows to fill the gap. Pressing `⌥` or `⌃⌘` within 0.45s of starting restores the layout so you can still swap/re-split. |
 | **Manual Edge Resize** on a tiled window's own edge | Detaches it cleanly and expands neighboring windows so no stale seam stays behind. |
