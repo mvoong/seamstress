@@ -212,6 +212,26 @@ struct MenuBarPopoverView: View {
 
     private var controlsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Seam style")
+                    .font(.subheadline)
+                Picker("Seam style", selection: Binding(
+                    get: { appState.seamEffectStyle },
+                    set: { appState.setSeamEffectStyle($0) }
+                )) {
+                    ForEach(SeamEffectStyle.allCases) { style in
+                        Text(style.displayName).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                Text(appState.seamEffectStyle.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Toggle("Show menu bar icon", isOn: Binding(
                 get: { appState.showMenuBarIcon },
                 set: { appState.setShowMenuBarIcon($0) }

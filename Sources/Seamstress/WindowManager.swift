@@ -107,6 +107,7 @@ final class WindowManager: ObservableObject {
         }
 
         isRunning = true
+        seamOverlay.warmUpMetalIfNeeded()
         SeamstressLog.lifecycle.notice("Seamstress started")
         adoptExistingLayoutsIfNeeded()
         refreshSeamsAndUI()
@@ -134,6 +135,10 @@ final class WindowManager: ObservableObject {
     /// Refresh menu-bar / standalone window state for the display under the cursor.
     func refreshForMenuPresentation() {
         updateMenuState()
+    }
+
+    func setSeamEffectStyle(_ style: SeamEffectStyle) {
+        seamOverlay.setEffectStyle(style)
     }
 
     /// Reset all splits in the active Space on the current display back to 50/50.

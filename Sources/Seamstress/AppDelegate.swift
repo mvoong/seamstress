@@ -1,5 +1,6 @@
 import ApplicationServices
 import Cocoa
+import SeamstressCore
 import ServiceManagement
 import SwiftUI
 
@@ -7,6 +8,7 @@ import SwiftUI
 final class AppState: ObservableObject {
     @Published var isEnabled: Bool = true
     @Published var showMenuBarIcon: Bool = true
+    @Published var seamEffectStyle: SeamEffectStyle = .defaultStyle
     @Published var isAccessibilityTrusted: Bool = AXIsProcessTrusted()
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
     @Published var launchAtLoginRequiresApproval: Bool = (SMAppService.mainApp.status == .requiresApproval)
@@ -17,6 +19,7 @@ final class AppState: ObservableObject {
 
     var onEnabledChanged: ((Bool) -> Void)?
     var onShowMenuBarIconChanged: ((Bool) -> Void)?
+    var onSeamEffectStyleChanged: ((SeamEffectStyle) -> Void)?
 
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
@@ -28,6 +31,12 @@ final class AppState: ObservableObject {
         showMenuBarIcon = show
         UserDefaults.standard.set(show, forKey: "seamstress.showMenuBarIcon")
         onShowMenuBarIconChanged?(show)
+    }
+
+    func setSeamEffectStyle(_ style: SeamEffectStyle) {
+        seamEffectStyle = style
+        UserDefaults.standard.set(style.rawValue, forKey: SeamEffectStyle.userDefaultsKey)
+        onSeamEffectStyleChanged?(style)
     }
 
     func requestAccessibility() {
@@ -138,6 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.object(forKey: "seamstress.showMenuBarIcon") != nil {
             appState.showMenuBarIcon = UserDefaults.standard.bool(forKey: "seamstress.showMenuBarIcon")
         }
+        appState.seamEffectStyle = SeamEffectStyle.fromStoredValue(
+            UserDefaults.standard.string(forKey: SeamEffectStyle.userDefaultsKey)
+        )
+        windowManager.setSeamEffectStyle(appState.seamEffectStyle)
 
         appState.onEnabledChanged = { [weak self] enabled in
             guard let self else { return }
@@ -155,6 +168,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.popover?.performClose(nil)
             }
             self.statusItem?.isVisible = show
+        }
+
+        appState.onSeamEffectStyleChanged = { [weak self] style in
+            self?.windowManager.setSeamEffectStyle(style)
         }
 
         setupStatusItem()
