@@ -5,6 +5,16 @@ All notable changes to Seamstress are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-27
+
+### Added
+- Configurable Metal-rendered seam highlight styles in the menu bar popover (**Elastic**, **Prism**, and **Classic** fallback, persisted via `seamstress.seamEffectStyle`):
+  - **Elastic** (default): Snappy spring-physics cord that flexes crisply as you drag, pulses on magnetic detents, and highlights amber when clamped at a minimum window size.
+  - **Prism**: Iridescent liquid-glass ribbon with cursor-tracking spectral sheen and traveling optical shockwaves on detent snaps.
+  - **Classic**: Minimal system accent hairline and grip pill (pure Core Animation).
+  - Driven by vsync-paced `CVDisplayLink` with non-blocking GPU frame pacing, async shader warmup, and zero idle CPU/GPU overhead.
+- Third-width (`1/3`) snap zones when dragging closer to an edge across empty screens/slots, occupied pane splits, T-junction container splits, and own-slot shrinks.
+
 ## [0.1.3] - 2026-11-25
 
 ### Fixed
@@ -43,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sleep/lock/wake layout preservation and Option-click unfocused-window protection.
 - Universal (`arm64` + `x86_64`) signed and notarized DMG release script.
 
+[0.2.0]: https://github.com/mvoong/seamstress/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/mvoong/seamstress/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mvoong/seamstress/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mvoong/seamstress/compare/v0.1.0...v0.1.1
